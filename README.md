@@ -32,12 +32,23 @@ python3 generate_replications.py \
   --action create
 ```
 
-### View Status
+### View Status (Source Only)
 
 ```bash
 python3 generate_replications.py \
   --src_host src.cluster.com \
   --src_user admin \
+  --action summary
+```
+
+### View Status (Source + Destination)
+
+```bash
+python3 generate_replications.py \
+  --src_host src.cluster.com \
+  --src_user admin \
+  --dst_host dst.cluster.com \
+  --dst_user admin \
   --action summary
 ```
 
@@ -57,7 +68,7 @@ cd qrepli
 |--------|-------------|-------|
 | `accept` | Accept pending replications on destination | `--dst_host`, `--dst_user` |
 | `create` | Create new replications from source to destination | `--src_host`, `--src_user`, `--dst_host`, `--dst_user` |
-| `summary` | Show replication status on source | `--src_host`, `--src_user` |
+| `summary` | Show replication status on source (optionally destination too) | `--src_host`, `--src_user` (optional: `--dst_host`, `--dst_user`) |
 | `clean` | Delete replications under path | `--src_host`, `--src_user`, `--basepath` |
 
 ### Options
@@ -130,7 +141,7 @@ python3 generate_replications.py \
   --action create
 ```
 
-### View Summary Table
+### View Summary Table (Source Only)
 
 ```bash
 python3 generate_replications.py \
@@ -152,6 +163,50 @@ Target IP       | Replication Count
 --------------------------------------
 10.1.1.20       | 5
 10.1.1.21       | 3
+```
+
+### View Summary Table (Source + Destination)
+
+```bash
+python3 generate_replications.py \
+  --src_host src.cluster.com \
+  --src_user admin \
+  --dst_host dst.cluster.com \
+  --dst_user admin \
+  --action summary
+```
+
+Shows both source and destination cluster information:
+```
+Source Cluster Replication Summary:
+========================================================
+Path              | Target IP    | File ID      | Replication ID
+--------------------------------------------------------
+/data/project1/   | 10.1.1.20   | 846415...   | abc-123...
+/data/project2/   | 10.1.1.21   | 846415...   | def-456...
+
+Target IP       | Replication Count
+--------------------------------------
+10.1.1.20       | 5
+10.1.1.21       | 3
+
+
+====================================================================================================
+Destination Cluster Summary:
+====================================================================================================
+Cluster Name: destination-cluster
+Cluster ID: dst-cluster-123
+Total Target Relationships: 8
+
+Source Path       | Target Path       | State       | Source Cluster  | Replication ID
+----------------------------------------------------------------------------------------
+/data/project1/   | /data/project1/   | ESTABLISHED | src-cluster     | abc-123...
+/data/project2/   | /data/project2/   | REPLICATING | src-cluster     | def-456...
+
+State                     | Count
+--------------------------------------
+ESTABLISHED               | 6
+REPLICATING              | 2
 ```
 
 ## How Load Balancing Works
