@@ -6,7 +6,7 @@ Tests for TargetCluster class using dependency injection (no mocking)
 import pytest
 import logging
 from typing import List, Dict, Any
-from generate_replications import TargetCluster
+from replication import TargetCluster
 
 # Configure logging
 logger = logging.getLogger(__name__)

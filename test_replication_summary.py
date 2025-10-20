@@ -9,7 +9,7 @@ import logging
 from typing import List, Dict, Any
 from io import StringIO
 import sys
-from generate_replications import ReplicationManager, TargetCluster
+from replication import ReplicationManager, TargetCluster
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
