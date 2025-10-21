@@ -38,18 +38,46 @@ class FakeNetworkAPI:
         ]
 
 
+class FakeReplicationAPI:
+    """Fake replication API"""
+
+    def __init__(self, target_relationships: List[Dict[str, Any]]):
+        self.target_relationships = target_relationships
+
+    def list_target_relationship_statuses(self) -> List[Dict[str, Any]]:
+        """Simulate listing target relationships"""
+        return self.target_relationships
+
+
+class FakeClusterAPI:
+    """Fake cluster API for getting cluster info"""
+
+    def __init__(self, cluster_name: str = "test-cluster", cluster_id: str = "cluster-123"):
+        self.cluster_name = cluster_name
+        self.cluster_id = cluster_id
+
+    def get_cluster_conf(self) -> Dict[str, str]:
+        """Simulate getting cluster configuration"""
+        return {
+            "cluster_name": self.cluster_name,
+            "cluster_id": self.cluster_id
+        }
+
+
 class FakeRestClient:
     """Fake RestClient that mimics qumulo.rest_client.RestClient"""
 
-    def __init__(self, networks: Dict[int, List[str]]):
+    def __init__(self, networks: Dict[int, List[str]], replication_api: FakeReplicationAPI = None, cluster_api: FakeClusterAPI = None):
         self.network = FakeNetworkAPI(networks)
+        self.replication = replication_api or FakeReplicationAPI([])
+        self.cluster = cluster_api or FakeClusterAPI()
 
 
 class FakeClient:
     """Fake Client that mimics the Client class from qqbase"""
 
-    def __init__(self, networks: Dict[int, List[str]]):
-        self.rc = FakeRestClient(networks)
+    def __init__(self, networks: Dict[int, List[str]], replication_api: FakeReplicationAPI = None, cluster_api: FakeClusterAPI = None):
+        self.rc = FakeRestClient(networks, replication_api, cluster_api)
 
 
 # Test cases
@@ -298,6 +326,98 @@ class TestTargetClusterIntegration:
 
         # The difference should be reduced (perfect balance would be 15)
         assert max_load - min_load <= 2, f"Load not balanced: {final_load}"
+
+
+class TestTargetClusterDestinationInfo:
+    """Test get_destination_info() method on TargetCluster"""
+
+    def test_get_destination_info_returns_structured_data(self):
+        """Test: get_destination_info returns properly structured data with real API format"""
+        # Real target relationship data structure from pdb output
+        target_relationships = [
+            {
+                'id': '23fa5196-cca8-4692-8e96-2a8d65186c29',
+                'state': 'DISCONNECTED',
+                'end_reason': '',
+                'source_cluster_name': 'qwhat',
+                'source_cluster_uuid': '7ea26661-0796-409c-a440-330757c26816',
+                'source_root_path': '/snap_replication/',
+                'source_root_read_only': False,
+                'source_address': None,
+                'source_port': None,
+                'target_cluster_name': 'qwho',
+                'target_cluster_uuid': 'dc611450-c2ba-4073-99a1-4999778f222d',
+                'target_root_path': '/snap_replication/',
+                'target_root_read_only': False,
+                'job_state': 'REPLICATION_NOT_RUNNING',
+                'job_start_time': '',
+                'recovery_point': '2025-04-22T15:10:00.00023319Z',
+                'error_from_last_job': '',
+                'duration_of_last_job': {'nanoseconds': '51844430'},
+                'target_root_id': '62',
+                'replication_enabled': True,
+                'replication_job_status': None,
+                'recovery_point_snapshot': {'id': 88831, 'name': 'revert_to_37140_for_qwhat'},
+                'lock_key': None
+            },
+            {
+                'id': 'b3b7d559-e89c-4323-a408-efeb38f60eb6',
+                'state': 'ESTABLISHED',
+                'end_reason': '',
+                'source_cluster_name': 'qtest',
+                'source_cluster_uuid': 'fb9119f3-9ecd-4110-b6c4-44f65ecec31f',
+                'source_root_path': '/Users/',
+                'source_root_read_only': False,
+                'source_address': None,
+                'source_port': None,
+                'target_cluster_name': 'qwho',
+                'target_cluster_uuid': 'dc611450-c2ba-4073-99a1-4999778f222d',
+                'target_root_path': '/Users/',
+                'target_root_read_only': True,
+                'job_state': 'REPLICATION_NOT_RUNNING',
+                'job_start_time': '',
+                'recovery_point': '2025-10-21T06:39:30.802679475Z',
+                'error_from_last_job': '',
+                'duration_of_last_job': {'nanoseconds': '276261772'},
+                'target_root_id': '4',
+                'replication_enabled': True,
+                'replication_job_status': None,
+                'recovery_point_snapshot': {'id': 10038, 'name': 'replication_from_qtest'},
+                'lock_key': None
+            }
+        ]
+
+        cluster_ips = ["10.120.0.81"]
+        repl_api = FakeReplicationAPI(target_relationships)
+        cluster_api = FakeClusterAPI("qwho", "dc611450-c2ba-4073-99a1-4999778f222d")
+        fake_client = FakeClient({1: cluster_ips}, repl_api, cluster_api)
+
+        target = TargetCluster(fake_client, network_id=1)
+        dst_info = target.get_destination_info()
+
+        # Verify structure
+        assert "cluster_name" in dst_info
+        assert "cluster_id" in dst_info
+        assert "relationships" in dst_info
+        assert dst_info["cluster_name"] == "qwho"
+        assert dst_info["cluster_id"] == "dc611450-c2ba-4073-99a1-4999778f222d"
+        assert len(dst_info["relationships"]) == 2
+        assert dst_info["relationships"][0]["state"] == "DISCONNECTED"
+        assert dst_info["relationships"][1]["state"] == "ESTABLISHED"
+
+    def test_get_destination_info_handles_empty_relationships(self):
+        """Test: get_destination_info handles clusters with no relationships"""
+        cluster_ips = ["10.120.0.81"]
+        repl_api = FakeReplicationAPI([])
+        cluster_api = FakeClusterAPI("empty-cluster", "empty-123")
+        fake_client = FakeClient({1: cluster_ips}, repl_api, cluster_api)
+
+        target = TargetCluster(fake_client, network_id=1)
+        dst_info = target.get_destination_info()
+
+        assert dst_info["cluster_name"] == "empty-cluster"
+        assert dst_info["cluster_id"] == "empty-123"
+        assert dst_info["relationships"] == []
 
 
 if __name__ == "__main__":

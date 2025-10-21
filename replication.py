@@ -26,10 +26,11 @@ Discover subfolders with max-depth1 and generate replication relationships
 """
 
 import argparse
+import csv
 import logging
 import sys
 from typing import List, Dict, Optional, Any
-from qqbase import Client, Creds, RestClient, create_credentials
+from qqbase import Client, RestClient, create_credentials
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -54,7 +55,6 @@ class TargetCluster:
         else:
             self.available_ips = self.get_dst_ips()
 
-        # Initialize load tracking for all IPs
         for ip in self.available_ips:
             self.dst_load[ip] = 0
 
@@ -106,6 +106,75 @@ class TargetCluster:
         # Increment its load counter
         self.dst_load[min_ip] += 1
         return min_ip
+
+    def get_destination_info(self) -> Dict[str, Any]:
+        """
+        Retrieve destination cluster information including target relationships.
+
+
+        Raises:
+            Exception: If cluster configuration or relationships cannot be retrieved
+        """
+        cluster_name = self.client.cluster.get_cluster_conf()['cluster_name']
+
+        target_relationships = self.client.replication.list_target_relationship_statuses()
+
+        return {
+            "cluster_name": cluster_name,
+            "relationships": target_relationships,
+        }
+
+    def clean_ended_replications(self, basepath: str = "/") -> int:
+        """
+        Clean up ENDED replication relationships on destination cluster.
+
+        ENDED relationships are left behind when source-side relationships are deleted.
+        This method removes them from the destination cluster.
+
+        Args:
+            basepath: Only clean relationships under this path (default: /)
+
+        Returns:
+            Number of relationships deleted
+        """
+        # Get target relationships
+        target_relationships = self.client.replication.list_target_relationship_statuses()
+
+        deleted_count = 0
+        ended_relationships = []
+
+        # Find ENDED relationships under basepath
+        for rel in target_relationships:
+            target_path = rel.get("target_root_path", "")
+            state = rel.get("state", "")
+            rel_id = rel.get("id", "")
+            source_cluster = rel.get("source_cluster_name", "")
+
+            if state == "ENDED" and target_path.startswith(basepath):
+                ended_relationships.append({
+                    "id": rel_id,
+                    "path": target_path,
+                    "source_cluster": source_cluster
+                })
+
+        if not ended_relationships:
+            logger.info(f"No ENDED relationships found under {basepath}")
+            return 0
+
+        logger.info(f"Found {len(ended_relationships)} ENDED relationship(s) to delete")
+
+        # Delete each ENDED relationship
+        for rel in ended_relationships:
+            logger.info(f"Deleting ENDED relationship: {rel['id']} (path: {rel['path']}, source: {rel['source_cluster']})")
+            try:
+                self.client.replication.delete_target_relationship(rel['id'])
+                deleted_count += 1
+                logger.info(f"Successfully deleted relationship {rel['id']}")
+            except Exception as e:
+                logger.error(f"Failed to delete relationship {rel['id']}: {e}")
+
+        logger.info(f"Deleted {deleted_count} of {len(ended_relationships)} ENDED relationship(s)")
+        return deleted_count
 
     def accept_pending_replications(
         self, allow_non_empty_dir: bool = False, confirm: bool = False
@@ -239,9 +308,9 @@ class ReplicationManager:
         self.dst_load = {}
         self.created_replications = {}
 
-    def get_destination_info(self) -> Dict[str, Any]:
+    def get_source_info(self) -> Dict[str, Any]:
         """
-        Retrieve destination cluster information including target relationships.
+        Retrieve source cluster information including source relationships.
 
         Returns:
             Dict containing cluster_name, cluster_id, and list of relationships
@@ -249,141 +318,308 @@ class ReplicationManager:
         Raises:
             Exception: If cluster configuration or relationships cannot be retrieved
         """
-        # Get cluster configuration
-        cluster_conf = self.client.cluster.get_cluster_conf()
-        cluster_name = cluster_conf.get("cluster_name", "Unknown")
-        cluster_id = cluster_conf.get("cluster_id", "Unknown")
+        cluster_name = self.client.cluster.get_cluster_conf()['cluster_name']
 
-        # Warn if cluster info is missing
-        if cluster_name == "Unknown" or cluster_id == "Unknown":
-            logger.warning(
-                "Cluster configuration returned default values - API may have issues"
-            )
-
-        # Get all target relationships
-        target_relationships = self.client.replication.list_target_relationship_statuses()
+        source_relationships = self.client.replication.list_source_relationship_statuses()
 
         return {
             "cluster_name": cluster_name,
-            "cluster_id": cluster_id,
-            "relationships": target_relationships,
+            "relationships": source_relationships,
         }
 
-    def get_replication_status(self) -> List[str]:
-        """get paths currently covered by replication on cluster"""
-        replications = self.client.replication.list_source_relationships()
-        for repli in replications:
+    def get_replication_status(self) -> None:
+        """
+        Populate replication paths and load tracking from source cluster.
+        Uses get_source_info() internally for DRY.
+        """
+        source_info = self.get_source_info()
+        relationships = source_info.get("relationships", [])
+
+        for repli in relationships:
+            repli_path = repli.get("source_root_path")
             qfile_id = repli.get("source_root_id")
-            repli_path = self.client.fs.get_file_attr(qfile_id).get("path")
             dst_ip = repli.get("target_address")
-            self.repli_paths.update(
-                {
-                    repli_path: {
-                        "fid": qfile_id,
-                        "replid": repli.get("id"),
-                        "dst": dst_ip,
-                    }
-                }
-            )
+
+            self.repli_paths[repli_path] = {
+                "fid": qfile_id,
+                "replid": repli.get("id"),
+                "dst": dst_ip,
+            }
             self.dst_load[dst_ip] = 1 + self.dst_load.get(dst_ip, 0)
 
-    def display_status(self, dst_info: Optional[Dict[str, Any]] = None) -> None:
+    @staticmethod
+    def _truncate_string(s: str, max_len: int) -> str:
         """
-        Screen display of relationships configured in SRC cluster
-        and optionally destination cluster if dst_info is provided.
+        Truncate string to max length with '...' suffix if needed.
 
         Args:
-            dst_info: Optional destination cluster information
+            s: String to truncate
+            max_len: Maximum length including '...'
+
+        Returns:
+            Truncated string
         """
-        # Display source cluster information
-        if not self.repli_paths:
-            print("\nNo replication relationships found.")
-        else:
-            # Calculate column widths dynamically
-            paths = list(self.repli_paths.keys())
-            path_width = max(len(p) for p in paths)
+        if len(s) <= max_len:
+            return s
+        return s[:max_len-3] + "..."
 
-            # Header
-            header = f"{'Path':<{path_width}} | {'Target IP':<15} | {'File ID':<32} | {'Replication ID':<36}"
-            print("\nSource Cluster Replication Summary:")
-            print("=" * len(header))
-            print(header)
-            print("-" * len(header))
+    def _display_cluster_summary_card(self, cluster_info: Dict[str, Any], cluster_type: str = "Source") -> None:
+        """
+        Display cluster information in card/block format (easier to read, good for health checks).
 
-            # Rows
-            for path, details in sorted(self.repli_paths.items()):
-                dst = details.get("dst", "N/A")
-                fid = details.get("fid", "N/A")
-                replid = details.get("replid", "N/A")
-                print(f"{path:<{path_width}} | {dst:<15} | {fid:<32} | {replid:<36}")
+        Args:
+            cluster_info: Dict with cluster_name, cluster_id, relationships
+            cluster_type: Either "Source" or "Destination"
+        """
+        cluster_name = cluster_info.get("cluster_name", "Unknown")
+        cluster_id = cluster_info.get("cluster_id", "Unknown")
+        relationships = cluster_info.get("relationships", [])
 
-            # Load summary
-            if self.dst_load:
-                print(f"\n{'Target IP':<15} | {'Replication Count':<20}")
-                print("-" * 38)
-                for ip, count in sorted(self.dst_load.items()):
-                    print(f"{ip:<15} | {count:<20}")
-
-        # Display destination cluster information if provided
-        if dst_info:
-            self._display_destination_status(dst_info)
-
-    def _display_destination_status(self, dst_info: Dict[str, Any]) -> None:
-        """Display destination cluster information"""
-        cluster_name = dst_info.get("cluster_name", "Unknown")
-        cluster_id = dst_info.get("cluster_id", "Unknown")
-        relationships = dst_info.get("relationships", [])
+        # Determine field names based on cluster type
+        if cluster_type == "Source":
+            remote_cluster_field = "target_cluster_name"
+            remote_label = "Target"
+        else:  # Destination
+            remote_cluster_field = "source_cluster_name"
+            remote_label = "Source"
 
         print("\n")
         print("=" * 100)
-        print("Destination Cluster Summary:")
+        print(f"{cluster_type} Cluster Summary:")
         print("=" * 100)
-        print(f"Cluster Name: {cluster_name}")
-        print(f"Cluster ID: {cluster_id}")
-        print(f"Total Target Relationships: {len(relationships)}")
+        print(f"Cluster: {cluster_name} ({cluster_id[:16]}...)")
+        print(f"Total Relationships: {len(relationships)}")
 
         if not relationships:
-            print("\nNo target replication relationships found on destination cluster.")
+            print(f"\nNo {cluster_type.lower()} replication relationships found.")
             return
 
-        # Calculate column widths
-        if relationships:
-            source_paths = [r.get("source_root_path", "N/A") for r in relationships]
-            target_paths = [r.get("target_root_path", "N/A") for r in relationships]
-            states = [r.get("state", "N/A") for r in relationships]
-            source_clusters = [r.get("source_cluster_name", "N/A") for r in relationships]
+        print()
 
-            source_path_width = max(len(p) for p in source_paths) if source_paths else 20
-            target_path_width = max(len(p) for p in target_paths) if target_paths else 20
-            state_width = max(len(s) for s in states) if states else 15
-            cluster_width = max(len(c) for c in source_clusters) if source_clusters else 15
+        # Display each relationship as a card
+        for rel in sorted(relationships, key=lambda x: x.get("source_root_path", "")):
+            source_path = rel.get("source_root_path", "N/A")
+            target_path = rel.get("target_root_path", "N/A")
+            remote_cluster = rel.get(remote_cluster_field, "N/A")
+            state = rel.get("state", "UNKNOWN")
+            rel_id = rel.get("id", "N/A")
+            error = rel.get("error_from_last_job", "")
+            recovery_point = rel.get("recovery_point", "")
 
-            # Header
-            print("\n")
-            header = f"{'Source Path':<{source_path_width}} | {'Target Path':<{target_path_width}} | {'State':<{state_width}} | {'Source Cluster':<{cluster_width}} | {'Replication ID':<36}"
-            print(header)
-            print("-" * len(header))
+            # State indicator
+            if state == "ESTABLISHED" and not error:
+                state_icon = "✓"
+            elif state in ["REPLICATING", "CREATING"]:
+                state_icon = "⟳"
+            elif error or state in ["DISCONNECTED", "ERROR"]:
+                state_icon = "✗"
+            else:
+                state_icon = "⚠"
 
-            # Rows
-            for rel in sorted(relationships, key=lambda x: x.get("target_root_path", "")):
-                source_path = rel.get("source_root_path", "N/A")
-                target_path = rel.get("target_root_path", "N/A")
-                state = rel.get("state", "N/A")
-                source_cluster = rel.get("source_cluster_name", "N/A")
-                rel_id = rel.get("id", "N/A")
-                print(f"{source_path:<{source_path_width}} | {target_path:<{target_path_width}} | {state:<{state_width}} | {source_cluster:<{cluster_width}} | {rel_id:<36}")
+            # Display card
+            print(f"▸ {source_path} → {remote_cluster}:{target_path}")
+            print(f"  State: {state} {state_icon}")
+            print(f"  ID: {rel_id[:16]}...")
+
+            # Show error prominently if present
+            if error:
+                print(f"  ⚠ Error: {error[:80]}{'...' if len(error) > 80 else ''}")
+
+            # Show recovery point if available
+            if recovery_point:
+                # Format timestamp: 2025-10-21T06:40:30.804453983Z -> 2025-10-21 06:40:30
+                timestamp = recovery_point.split('T')
+                if len(timestamp) == 2:
+                    date = timestamp[0]
+                    time = timestamp[1].split('.')[0]
+                    print(f"  Recovery Point: {date} {time}")
+
+            # Show queued snapshots for source if available
+            if cluster_type == "Source":
+                queued = rel.get("queued_snapshot_count")
+                if queued is not None and queued > 0:
+                    print(f"  Queued Snapshots: {queued}")
+
+                mode = rel.get("replication_mode", "")
+                if "CONTINUOUS" in mode:
+                    print(f"  Mode: Continuous")
+                elif "SNAPSHOT" in mode:
+                    print(f"  Mode: Snapshot Policy")
+
+            print()  # Blank line between cards
 
         # State summary
-        if relationships:
-            state_counts = {}
-            for rel in relationships:
-                state = rel.get("state", "UNKNOWN")
-                state_counts[state] = state_counts.get(state, 0) + 1
+        state_counts = {}
+        for rel in relationships:
+            state = rel.get("state", "UNKNOWN")
+            state_counts[state] = state_counts.get(state, 0) + 1
 
-            print(f"\n{'State':<25} | {'Count':<10}")
-            print("-" * 38)
-            for state, count in sorted(state_counts.items()):
-                print(f"{state:<25} | {count:<10}")
+        print("State Summary:")
+        for state, count in sorted(state_counts.items()):
+            icon = "✓" if state == "ESTABLISHED" else ("⟳" if state == "REPLICATING" else "⚠")
+            print(f"  {icon} {state}: {count}")
+
+    def _display_cluster_summary(self, cluster_info: Dict[str, Any], cluster_type: str = "Source") -> None:
+        """
+        Unified display for both source and destination cluster information (fixed-width table).
+
+        Args:
+            cluster_info: Dict with cluster_name, cluster_id, relationships
+            cluster_type: Either "Source" or "Destination"
+        """
+        # Fixed column widths for predictable table size (~130 chars total)
+        SOURCE_PATH_WIDTH = 35
+        TARGET_PATH_WIDTH = 35
+        STATE_WIDTH = 15
+        CLUSTER_WIDTH = 20
+        ID_WIDTH = 16  # Truncated UUID
+
+        cluster_name = cluster_info.get("cluster_name", "Unknown")
+        relationships = cluster_info.get("relationships", [])
+
+        # Determine field names based on cluster type
+        if cluster_type == "Source":
+            local_path_field = "source_root_path"
+            local_label = "Source"
+            remote_cluster_field = "target_cluster_name"
+            remote_path_field = "target_root_path"
+            remote_label = "Target"
+        else:  # Destination
+            local_path_field = "target_root_path"
+            local_label = "Target"
+            remote_cluster_field = "source_cluster_name"
+            remote_path_field = "source_root_path"
+            remote_label = "Source"
+
+        print("\n")
+        print("=" * 130)
+        print(f"{cluster_type} Cluster Summary:")
+        print("=" * 130)
+        print(f"Cluster Name: {cluster_name}")
+        print(f"Total Relationships: {len(relationships)}")
+
+        if not relationships:
+            print(f"\nNo {cluster_type.lower()} replication relationships found.")
+            return
+
+        # Header
+        print("\n")
+        header = f"{f'{local_label} Path':<{SOURCE_PATH_WIDTH}} | {f'{remote_label} Path':<{TARGET_PATH_WIDTH}} | {'State':<{STATE_WIDTH}} | {f'{remote_label} Cluster':<{CLUSTER_WIDTH}} | {'ID (truncated)':<{ID_WIDTH}}"
+        print(header)
+        print("-" * len(header))
+
+        # Rows with truncation
+        for rel in sorted(relationships, key=lambda x: x.get("source_root_path", "")):
+            local_path = self._truncate_string(rel.get(local_path_field, "N/A"), SOURCE_PATH_WIDTH)
+            remote_path = self._truncate_string(rel.get(remote_path_field, "N/A"), TARGET_PATH_WIDTH)
+            state = self._truncate_string(rel.get("state", "N/A"), STATE_WIDTH)
+            remote_cluster = self._truncate_string(rel.get(remote_cluster_field, "N/A"), CLUSTER_WIDTH)
+            rel_id = rel.get("id", "N/A")[:ID_WIDTH]  # Truncate UUID
+
+            print(f"{local_path:<{SOURCE_PATH_WIDTH}} | {remote_path:<{TARGET_PATH_WIDTH}} | {state:<{STATE_WIDTH}} | {remote_cluster:<{CLUSTER_WIDTH}} | {rel_id:<{ID_WIDTH}}")
+
+        # State summary
+        state_counts = {}
+        for rel in relationships:
+            state = rel.get("state", "UNKNOWN")
+            state_counts[state] = state_counts.get(state, 0) + 1
+
+        print(f"\n{'State':<25} | {'Count':<10}")
+        print("-" * 38)
+        for state, count in sorted(state_counts.items()):
+            print(f"{state:<25} | {count:<10}")
+
+    def display_status(self, dst_info: Optional[Dict[str, Any]] = None, format: str = "table") -> None:
+        """
+        Screen display of relationships configured in both source and destination clusters.
+
+        Args:
+            dst_info: Optional destination cluster information
+            format: Display format - "table" (default) or "card"
+        """
+        # Get source cluster information
+        source_info = self.get_source_info()
+
+        # Choose display method based on format
+        if format == "card":
+            self._display_cluster_summary_card(source_info, "Source")
+            if dst_info:
+                self._display_cluster_summary_card(dst_info, "Destination")
+        else:  # Default to table format
+            self._display_cluster_summary(source_info, "Source")
+            if dst_info:
+                self._display_cluster_summary(dst_info, "Destination")
+
+    def save_to_csv(self, filepath: str, source_info: Dict[str, Any], dst_info: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Save replication relationship data to CSV file.
+
+        Args:
+            filepath: Path to CSV file to create
+            source_info: Source cluster information
+            dst_info: Optional destination cluster information
+
+        The CSV includes all relationship details without truncation.
+        """
+        fieldnames = [
+            "cluster_type",
+            "cluster_name",
+            "cluster_id",
+            "source_path",
+            "target_path",
+            "remote_cluster",
+            "state",
+            "replication_id",
+            "error",
+            "recovery_point",
+            "queued_snapshots",
+            "replication_mode"
+        ]
+
+        with open(filepath, 'w', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+
+            # Write source relationships
+            source_relationships = source_info.get("relationships", [])
+            for rel in source_relationships:
+                row = {
+                    "cluster_type": "Source",
+                    "cluster_name": source_info.get("cluster_name", ""),
+                    "cluster_id": source_info.get("cluster_id", ""),
+                    "source_path": rel.get("source_root_path", ""),
+                    "target_path": rel.get("target_root_path", ""),
+                    "remote_cluster": rel.get("target_cluster_name", ""),
+                    "state": rel.get("state", ""),
+                    "replication_id": rel.get("id", ""),
+                    "error": rel.get("error_from_last_job", ""),
+                    "recovery_point": rel.get("recovery_point", ""),
+                    "queued_snapshots": rel.get("queued_snapshot_count", ""),
+                    "replication_mode": rel.get("replication_mode", "")
+                }
+                writer.writerow(row)
+
+            # Write destination relationships if provided
+            if dst_info:
+                dst_relationships = dst_info.get("relationships", [])
+                for rel in dst_relationships:
+                    row = {
+                        "cluster_type": "Destination",
+                        "cluster_name": dst_info.get("cluster_name", ""),
+                        "cluster_id": dst_info.get("cluster_id", ""),
+                        "source_path": rel.get("source_root_path", ""),
+                        "target_path": rel.get("target_root_path", ""),
+                        "remote_cluster": rel.get("source_cluster_name", ""),
+                        "state": rel.get("state", ""),
+                        "replication_id": rel.get("id", ""),
+                        "error": rel.get("error_from_last_job", ""),
+                        "recovery_point": rel.get("recovery_point", ""),
+                        "queued_snapshots": "",  # Not available on target side
+                        "replication_mode": ""  # Not available on target side
+                    }
+                    writer.writerow(row)
+
+        logger.info(f"Saved replication data to CSV: {filepath}")
 
     def create_replications(self, basepath: str, dst: "TargetCluster"):
         """
@@ -419,6 +655,7 @@ class ReplicationManager:
                     )
 
     def clean_replications(self, basepath):
+        """Delete source-side replication relationships under basepath"""
         for path, values in self.repli_paths.items():
             if path.startswith(basepath):
                 rid = values.get("replid")
@@ -433,22 +670,32 @@ def main():
         epilog="""
 Examples:
   # Show replication summary for source cluster only
-  python3 generate_replications.py --src_host src.cluster.com --src_user admin --src_password pass --action summary
+  python3 replication.py --src_host src.cluster.com --src_user admin --src_password pass --action summary
 
   # Show replication summary for BOTH source and destination clusters
-  python3 generate_replications.py --src_host src.cluster.com --src_user admin --src_password pass \\
+  python3 replication.py --src_host src.cluster.com --src_user admin --src_password pass \\
     --dst_host dst.cluster.com --dst_user admin --dst_password pass --action summary
 
   # Create replications from /data to destination cluster
-  python3 generate_replications.py --src_host src.cluster.com --src_user admin --src_password pass \\
+  python3 replication.py --src_host src.cluster.com --src_user admin --src_password pass \\
     --dst_host dst.cluster.com --dst_user admin --dst_password pass \\
     --basepath /data --action create
 
   # Accept pending replications on destination (no src required)
-  python3 generate_replications.py --dst_host dst.cluster.com --dst_user admin --action accept
+  python3 replication.py --dst_host dst.cluster.com --dst_user admin --action accept
 
   # Accept with confirmation prompt and password prompt
-  python3 generate_replications.py --dst_host dst.cluster.com --dst_user admin --action accept --confirm
+  python3 replication.py --dst_host dst.cluster.com --dst_user admin --action accept --confirm
+
+  # Clean source-side relationships
+  python3 replication.py --src_host src.cluster.com --src_user admin --basepath /data --action clean
+
+  # Clean ENDED relationships on destination
+  python3 replication.py --dst_host dst.cluster.com --dst_user admin --basepath /test-qwalk-parent --action clean
+
+  # Clean BOTH source and destination at once
+  python3 replication.py --src_host src.cluster.com --src_user admin \\
+    --dst_host dst.cluster.com --dst_user admin --basepath /data --action clean
         """,
     )
     # Source cluster connection (required for summary/create/clean actions)
@@ -461,6 +708,22 @@ Examples:
     parser.add_argument("--basepath", default="/", help="Directory path to search")
     parser.add_argument(
         "--action", choices=["create", "clean", "summary", "accept"], default="summary"
+    )
+    parser.add_argument(
+        "--format",
+        choices=["table", "card"],
+        default="table",
+        help="Display format for summary: 'table' (default, compact columns) or 'card' (readable blocks, good for health checks)"
+    )
+    parser.add_argument(
+        "--csv",
+        metavar="FILEPATH",
+        help="Save summary to CSV file (e.g., --csv replication_status.csv). Full data, no truncation."
+    )
+    parser.add_argument(
+        "--csv-only",
+        action="store_true",
+        help="Export to CSV without displaying to screen (requires --csv)"
     )
     # Destination cluster connection (required for create/accept actions)
     parser.add_argument("--dst_host", help="Destination cluster hostname or IP address")
@@ -505,10 +768,11 @@ Examples:
         logger.info(f"Querying base path {args.basepath}")
 
         rm = ReplicationManager(src_client)
-        # preload config so faster when querying
-        replication_paths = rm.get_replication_status()
-
+        
     if args.action == "summary":
+        # Get source info
+        source_info = rm.get_source_info()
+
         # Check if user wants destination info as well
         dst_info = None
         if args.dst_host and args.dst_user:
@@ -517,18 +781,28 @@ Examples:
                 dst_creds = create_credentials(args.dst_host, args.dst_user, args.dst_password)
                 dst_client = Client(dst_creds)
 
-                # Create a temporary ReplicationManager for destination to get info
-                dst_rm = ReplicationManager(dst_client)
-                dst_info = dst_rm.get_destination_info()
+                dst_target = TargetCluster(
+                    dst_client, user_provided_ips=args.dst, network_id=int(args.dst_network_id)
+                )
+                dst_info = dst_target.get_destination_info()
                 logger.info(f"Successfully retrieved destination cluster info: {dst_info.get('cluster_name')}")
             except Exception as e:
                 logger.error(
                     f"Failed to connect to destination cluster: {type(e).__name__}: {e}"
                 )
-                logger.info("Displaying source cluster information only.")
                 dst_info = None
 
-        rm.display_status(dst_info=dst_info)
+        # Display to screen (unless --csv-only)
+        if not args.csv_only:
+            rm.display_status(dst_info=dst_info, format=args.format)
+
+        # Save to CSV if requested
+        if args.csv:
+            rm.save_to_csv(args.csv, source_info, dst_info)
+            print(f"\nSaved to CSV: {args.csv}")
+        elif args.csv_only:
+            logger.error("--csv-only requires --csv FILEPATH")
+            sys.exit(1)
 
     elif args.action == "create":
         # Validate required destination parameters
@@ -547,14 +821,35 @@ Examples:
         target_cluster = TargetCluster(
             dst_client, user_provided_ips=args.dst, network_id=int(args.dst_network_id)
         )
-
-        replications = rm.create_replications(
+        
+        rm.create_replications(
             args.basepath,
             dst=target_cluster,
         )
 
     elif args.action == "clean":
+        # Clean source-side relationships
+        logger.info(f"Cleaning source-side relationships under {args.basepath}")
         rm.clean_replications(args.basepath)
+
+        # Clean destination-side ENDED relationships if dst credentials provided
+        if args.dst_host and args.dst_user:
+            logger.info(f"Connecting to destination cluster {args.dst_host}...")
+            dst_creds = create_credentials(args.dst_host, args.dst_user, args.dst_password)
+            dst_client = Client(dst_creds)
+
+            target_cluster = TargetCluster(
+                dst_client, user_provided_ips=args.dst, network_id=int(args.dst_network_id)
+            )
+
+            logger.info(f"Cleaning ENDED relationships on destination under {args.basepath}")
+            deleted_count = target_cluster.clean_ended_replications(basepath=args.basepath)
+            print(f"\n✓ Cleaned up {deleted_count} ENDED replication relationship(s) on destination")
+
+        # If neither src nor dst provided, error
+        if not (args.src_host and args.src_user) and not (args.dst_host and args.dst_user):
+            logger.error("'clean' action requires --src_host and --src_user (to clean source) and/or --dst_host and --dst_user (to clean ENDED on destination)")
+            sys.exit(1)
 
     elif args.action == "accept":
         # Validate required destination parameters

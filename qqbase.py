@@ -120,17 +120,7 @@ def main() -> None:
         creds["QUSER"] = args.username
         creds["QPASS"] = password
 
-    logger.info(f"Querying base path {args.basepath}")
     client = Client(creds)
-    results = client.rc.fs.enumerate_entire_directory(path=args.basepath)
-   
-   # import pdb; pdb.set_trace()
-    
-
-#        import pdb; pdb.set_trace()
-# logger.info(
-#    f"Total capacity reported {snapshot.format_bytes(int(snapshot.rc.snapshot.get_total_used_capacity()['bytes']))}"
-# )
 
 
 if __name__ == "__main__":
