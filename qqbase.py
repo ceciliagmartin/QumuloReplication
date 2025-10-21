@@ -29,7 +29,9 @@ logging.basicConfig(
 )
 
 
-def create_credentials(host: str, user: str, password: Optional[str] = None, port: int = 8000) -> Creds:
+def create_credentials(
+    host: str, user: str, password: Optional[str] = None, port: int = 8000
+) -> Creds:
     """
     Create credentials dictionary with password prompt if not provided
 

@@ -65,7 +65,12 @@ class FakeClusterAPI:
 class FakeRestClient:
     """Fake RestClient that mimics qumulo.rest_client.RestClient"""
 
-    def __init__(self, networks: Dict[int, List[str]], replication_api: FakeReplicationAPI = None, cluster_api: FakeClusterAPI = None):
+    def __init__(
+        self,
+        networks: Dict[int, List[str]],
+        replication_api: FakeReplicationAPI = None,
+        cluster_api: FakeClusterAPI = None,
+    ):
         self.network = FakeNetworkAPI(networks)
         self.replication = replication_api or FakeReplicationAPI([])
         self.cluster = cluster_api or FakeClusterAPI()
@@ -74,7 +79,12 @@ class FakeRestClient:
 class FakeClient:
     """Fake Client that mimics the Client class from qqbase"""
 
-    def __init__(self, networks: Dict[int, List[str]], replication_api: FakeReplicationAPI = None, cluster_api: FakeClusterAPI = None):
+    def __init__(
+        self,
+        networks: Dict[int, List[str]],
+        replication_api: FakeReplicationAPI = None,
+        cluster_api: FakeClusterAPI = None,
+    ):
         self.rc = FakeRestClient(networks, replication_api, cluster_api)
 
 
@@ -112,7 +122,9 @@ class TestTargetClusterInitialization:
         fake_client = FakeClient({1: cluster_ips})
 
         with caplog.at_level(logging.WARNING):
-            target = TargetCluster(fake_client, user_provided_ips=user_ips, network_id=1)
+            target = TargetCluster(
+                fake_client, user_provided_ips=user_ips, network_id=1
+            )
 
         assert target.available_ips == user_ips
         assert "may be unbalanced" in caplog.text
@@ -253,10 +265,9 @@ class TestTargetClusterFIPRetrieval:
 
     def test_get_dst_ips_from_multiple_networks(self):
         """Test that get_dst_ips retrieves FIPs from correct network"""
-        fake_client = FakeClient({
-            1: ["10.1.1.20", "10.1.1.21"],
-            2: ["10.2.2.30", "10.2.2.31", "10.2.2.32"]
-        })
+        fake_client = FakeClient(
+            {1: ["10.1.1.20", "10.1.1.21"], 2: ["10.2.2.30", "10.2.2.31", "10.2.2.32"]}
+        )
         target = TargetCluster(fake_client, network_id=2)
 
         retrieved_ips = target.get_dst_ips()
@@ -334,55 +345,61 @@ class TestTargetClusterDestinationInfo:
         # Real target relationship data structure from pdb output
         target_relationships = [
             {
-                'id': '23fa5196-cca8-4692-8e96-2a8d65186c29',
-                'state': 'DISCONNECTED',
-                'end_reason': '',
-                'source_cluster_name': 'qwhat',
-                'source_cluster_uuid': '7ea26661-0796-409c-a440-330757c26816',
-                'source_root_path': '/snap_replication/',
-                'source_root_read_only': False,
-                'source_address': None,
-                'source_port': None,
-                'target_cluster_name': 'qwho',
-                'target_cluster_uuid': 'dc611450-c2ba-4073-99a1-4999778f222d',
-                'target_root_path': '/snap_replication/',
-                'target_root_read_only': False,
-                'job_state': 'REPLICATION_NOT_RUNNING',
-                'job_start_time': '',
-                'recovery_point': '2025-04-22T15:10:00.00023319Z',
-                'error_from_last_job': '',
-                'duration_of_last_job': {'nanoseconds': '51844430'},
-                'target_root_id': '62',
-                'replication_enabled': True,
-                'replication_job_status': None,
-                'recovery_point_snapshot': {'id': 88831, 'name': 'revert_to_37140_for_qwhat'},
-                'lock_key': None
+                "id": "23fa5196-cca8-4692-8e96-2a8d65186c29",
+                "state": "DISCONNECTED",
+                "end_reason": "",
+                "source_cluster_name": "qwhat",
+                "source_cluster_uuid": "7ea26661-0796-409c-a440-330757c26816",
+                "source_root_path": "/snap_replication/",
+                "source_root_read_only": False,
+                "source_address": None,
+                "source_port": None,
+                "target_cluster_name": "qwho",
+                "target_cluster_uuid": "dc611450-c2ba-4073-99a1-4999778f222d",
+                "target_root_path": "/snap_replication/",
+                "target_root_read_only": False,
+                "job_state": "REPLICATION_NOT_RUNNING",
+                "job_start_time": "",
+                "recovery_point": "2025-04-22T15:10:00.00023319Z",
+                "error_from_last_job": "",
+                "duration_of_last_job": {"nanoseconds": "51844430"},
+                "target_root_id": "62",
+                "replication_enabled": True,
+                "replication_job_status": None,
+                "recovery_point_snapshot": {
+                    "id": 88831,
+                    "name": "revert_to_37140_for_qwhat",
+                },
+                "lock_key": None,
             },
             {
-                'id': 'b3b7d559-e89c-4323-a408-efeb38f60eb6',
-                'state': 'ESTABLISHED',
-                'end_reason': '',
-                'source_cluster_name': 'qtest',
-                'source_cluster_uuid': 'fb9119f3-9ecd-4110-b6c4-44f65ecec31f',
-                'source_root_path': '/Users/',
-                'source_root_read_only': False,
-                'source_address': None,
-                'source_port': None,
-                'target_cluster_name': 'qwho',
-                'target_cluster_uuid': 'dc611450-c2ba-4073-99a1-4999778f222d',
-                'target_root_path': '/Users/',
-                'target_root_read_only': True,
-                'job_state': 'REPLICATION_NOT_RUNNING',
-                'job_start_time': '',
-                'recovery_point': '2025-10-21T06:39:30.802679475Z',
-                'error_from_last_job': '',
-                'duration_of_last_job': {'nanoseconds': '276261772'},
-                'target_root_id': '4',
-                'replication_enabled': True,
-                'replication_job_status': None,
-                'recovery_point_snapshot': {'id': 10038, 'name': 'replication_from_qtest'},
-                'lock_key': None
-            }
+                "id": "b3b7d559-e89c-4323-a408-efeb38f60eb6",
+                "state": "ESTABLISHED",
+                "end_reason": "",
+                "source_cluster_name": "qtest",
+                "source_cluster_uuid": "fb9119f3-9ecd-4110-b6c4-44f65ecec31f",
+                "source_root_path": "/Users/",
+                "source_root_read_only": False,
+                "source_address": None,
+                "source_port": None,
+                "target_cluster_name": "qwho",
+                "target_cluster_uuid": "dc611450-c2ba-4073-99a1-4999778f222d",
+                "target_root_path": "/Users/",
+                "target_root_read_only": True,
+                "job_state": "REPLICATION_NOT_RUNNING",
+                "job_start_time": "",
+                "recovery_point": "2025-10-21T06:39:30.802679475Z",
+                "error_from_last_job": "",
+                "duration_of_last_job": {"nanoseconds": "276261772"},
+                "target_root_id": "4",
+                "replication_enabled": True,
+                "replication_job_status": None,
+                "recovery_point_snapshot": {
+                    "id": 10038,
+                    "name": "replication_from_qtest",
+                },
+                "lock_key": None,
+            },
         ]
 
         cluster_ips = ["10.120.0.81"]

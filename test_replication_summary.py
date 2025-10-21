@@ -39,7 +39,12 @@ class FakeFileSystemAPI:
 class FakeReplicationAPI:
     """Fake replication API"""
 
-    def __init__(self, source_relationships: List[Dict[str, Any]], target_relationships: List[Dict[str, Any]] = None, source_relationship_statuses: List[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        source_relationships: List[Dict[str, Any]],
+        target_relationships: List[Dict[str, Any]] = None,
+        source_relationship_statuses: List[Dict[str, Any]] = None,
+    ):
         """
         Args:
             source_relationships: List of source replication relationships (for list_source_relationships)
@@ -66,7 +71,9 @@ class FakeReplicationAPI:
 class FakeClusterAPI:
     """Fake cluster API for getting cluster info"""
 
-    def __init__(self, cluster_name: str = "test-cluster", cluster_id: str = "cluster-123"):
+    def __init__(
+        self, cluster_name: str = "test-cluster", cluster_id: str = "cluster-123"
+    ):
         self.cluster_name = cluster_name
         self.cluster_id = cluster_id
 
@@ -80,7 +87,12 @@ class FakeClusterAPI:
 class FakeRestClient:
     """Fake RestClient"""
 
-    def __init__(self, fs_api: FakeFileSystemAPI, repl_api: FakeReplicationAPI, cluster_api: FakeClusterAPI = None):
+    def __init__(
+        self,
+        fs_api: FakeFileSystemAPI,
+        repl_api: FakeReplicationAPI,
+        cluster_api: FakeClusterAPI = None,
+    ):
         self.fs = fs_api
         self.replication = repl_api
         self.cluster = cluster_api or FakeClusterAPI()
@@ -106,7 +118,7 @@ class TestReplicationSummaryWithoutDestination:
                 "target_root_path": "/data/folder1",
                 "target_cluster_name": "dest-cluster",
                 "state": "ESTABLISHED",
-                "target_address": "10.120.3.54"
+                "target_address": "10.120.3.54",
             },
             {
                 "id": "repl-002",
@@ -114,7 +126,7 @@ class TestReplicationSummaryWithoutDestination:
                 "target_root_path": "/data/folder2",
                 "target_cluster_name": "dest-cluster",
                 "state": "ESTABLISHED",
-                "target_address": "10.120.3.55"
+                "target_address": "10.120.3.55",
             },
             {
                 "id": "repl-003",
@@ -122,8 +134,8 @@ class TestReplicationSummaryWithoutDestination:
                 "target_root_path": "/data/folder3",
                 "target_cluster_name": "dest-cluster",
                 "state": "REPLICATING",
-                "target_address": "10.120.3.54"
-            }
+                "target_address": "10.120.3.54",
+            },
         ]
 
         fs_api = FakeFileSystemAPI({})
@@ -178,7 +190,7 @@ class TestReplicationSummaryWithDestination:
                 "target_root_path": "/data/folder1",
                 "target_cluster_name": "destination-cluster",
                 "state": "ESTABLISHED",
-                "target_address": "10.120.3.54"
+                "target_address": "10.120.3.54",
             },
             {
                 "id": "repl-002",
@@ -186,8 +198,8 @@ class TestReplicationSummaryWithDestination:
                 "target_root_path": "/data/folder2",
                 "target_cluster_name": "destination-cluster",
                 "state": "REPLICATING",
-                "target_address": "10.120.3.55"
-            }
+                "target_address": "10.120.3.55",
+            },
         ]
 
         fs_api = FakeFileSystemAPI({})
@@ -206,16 +218,16 @@ class TestReplicationSummaryWithDestination:
                     "source_root_path": "/data/folder1",
                     "target_root_path": "/data/folder1",
                     "state": "ESTABLISHED",
-                    "source_cluster_name": "source-cluster"
+                    "source_cluster_name": "source-cluster",
                 },
                 {
                     "id": "repl-002",
                     "source_root_path": "/data/folder2",
                     "target_root_path": "/data/folder2",
                     "state": "REPLICATING",
-                    "source_cluster_name": "source-cluster"
-                }
-            ]
+                    "source_cluster_name": "source-cluster",
+                },
+            ],
         }
 
         # Create ReplicationManager and display status with dst_info
@@ -253,23 +265,23 @@ class TestReplicationSummaryWithDestination:
                     "source_root_path": "/path1",
                     "target_root_path": "/path1",
                     "state": "ESTABLISHED",
-                    "source_cluster_name": "src-cluster"
+                    "source_cluster_name": "src-cluster",
                 },
                 {
                     "id": "repl-002",
                     "source_root_path": "/path2",
                     "target_root_path": "/path2",
                     "state": "AWAITING_AUTHORIZATION",
-                    "source_cluster_name": "src-cluster"
+                    "source_cluster_name": "src-cluster",
                 },
                 {
                     "id": "repl-003",
                     "source_root_path": "/path3",
                     "target_root_path": "/path3",
                     "state": "REPLICATING",
-                    "source_cluster_name": "src-cluster"
-                }
-            ]
+                    "source_cluster_name": "src-cluster",
+                },
+            ],
         }
 
         rm = ReplicationManager(fake_client)
@@ -295,7 +307,7 @@ class TestReplicationSummaryWithDestination:
         dst_info = {
             "cluster_name": "dst-cluster",
             "cluster_id": "dst-123",
-            "relationships": []
+            "relationships": [],
         }
 
         rm = ReplicationManager(fake_client)
@@ -304,7 +316,10 @@ class TestReplicationSummaryWithDestination:
         captured = capsys.readouterr()
 
         assert "Destination Cluster Summary:" in captured.out
-        assert "No destination replication relationships found" in captured.out or "dst-cluster" in captured.out
+        assert (
+            "No destination replication relationships found" in captured.out
+            or "dst-cluster" in captured.out
+        )
 
 
 class TestSourceInfoRetrieval:
@@ -329,7 +344,7 @@ class TestSourceInfoRetrieval:
                 "target_cluster_name": "destination-cluster",
                 "state": "REPLICATING",
                 "recovery_point": "2025-10-20T11:00:00Z",
-            }
+            },
         ]
 
         fs_api = FakeFileSystemAPI({})
@@ -377,16 +392,16 @@ class TestUnifiedClusterDisplay:
                     "source_root_path": "/data/folder1",
                     "target_root_path": "/data/folder1",
                     "target_cluster_name": "dest-cluster",
-                    "state": "ESTABLISHED"
+                    "state": "ESTABLISHED",
                 },
                 {
                     "id": "repl-002",
                     "source_root_path": "/data/folder2",
                     "target_root_path": "/data/folder2",
                     "target_cluster_name": "dest-cluster",
-                    "state": "REPLICATING"
-                }
-            ]
+                    "state": "REPLICATING",
+                },
+            ],
         }
 
         fs_api = FakeFileSystemAPI({})
@@ -415,9 +430,9 @@ class TestUnifiedClusterDisplay:
                     "source_root_path": "/data/folder3",
                     "target_root_path": "/data/folder3",
                     "source_cluster_name": "source-cluster",
-                    "state": "ESTABLISHED"
+                    "state": "ESTABLISHED",
                 }
-            ]
+            ],
         }
 
         fs_api = FakeFileSystemAPI({})
@@ -441,11 +456,35 @@ class TestUnifiedClusterDisplay:
             "cluster_name": "test-cluster",
             "cluster_id": "test-123",
             "relationships": [
-                {"id": "r1", "source_root_path": "/p1", "target_root_path": "/p1", "target_cluster_name": "t", "state": "ESTABLISHED"},
-                {"id": "r2", "source_root_path": "/p2", "target_root_path": "/p2", "target_cluster_name": "t", "state": "ESTABLISHED"},
-                {"id": "r3", "source_root_path": "/p3", "target_root_path": "/p3", "target_cluster_name": "t", "state": "REPLICATING"},
-                {"id": "r4", "source_root_path": "/p4", "target_root_path": "/p4", "target_cluster_name": "t", "state": "DISCONNECTED"},
-            ]
+                {
+                    "id": "r1",
+                    "source_root_path": "/p1",
+                    "target_root_path": "/p1",
+                    "target_cluster_name": "t",
+                    "state": "ESTABLISHED",
+                },
+                {
+                    "id": "r2",
+                    "source_root_path": "/p2",
+                    "target_root_path": "/p2",
+                    "target_cluster_name": "t",
+                    "state": "ESTABLISHED",
+                },
+                {
+                    "id": "r3",
+                    "source_root_path": "/p3",
+                    "target_root_path": "/p3",
+                    "target_cluster_name": "t",
+                    "state": "REPLICATING",
+                },
+                {
+                    "id": "r4",
+                    "source_root_path": "/p4",
+                    "target_root_path": "/p4",
+                    "target_cluster_name": "t",
+                    "state": "DISCONNECTED",
+                },
+            ],
         }
 
         fs_api = FakeFileSystemAPI({})
@@ -480,7 +519,7 @@ class TestCardDisplayFormat:
                 "error_from_last_job": "Target cluster error: Snapshot limit of 40000 has been reached.",
                 "recovery_point": "2025-09-25T13:10:00.000439663Z",
                 "queued_snapshot_count": 2102,
-                "replication_mode": "REPLICATION_SNAPSHOT_POLICY"
+                "replication_mode": "REPLICATION_SNAPSHOT_POLICY",
             },
             {
                 "id": "b3b7d559-e89c-4323-a408-efeb38f60eb6",
@@ -491,8 +530,8 @@ class TestCardDisplayFormat:
                 "error_from_last_job": "",
                 "recovery_point": "2025-10-21T06:40:30.804453983Z",
                 "queued_snapshot_count": 0,
-                "replication_mode": "REPLICATION_CONTINUOUS"
-            }
+                "replication_mode": "REPLICATION_CONTINUOUS",
+            },
         ]
 
         fs_api = FakeFileSystemAPI({})
@@ -531,9 +570,9 @@ class TestCardDisplayFormat:
                     "source_cluster_name": "qtest",
                     "state": "ESTABLISHED",
                     "error_from_last_job": "",
-                    "recovery_point": "2025-10-21T06:39:30.802679475Z"
+                    "recovery_point": "2025-10-21T06:39:30.802679475Z",
                 }
-            ]
+            ],
         }
 
         fs_api = FakeFileSystemAPI({})
@@ -560,7 +599,7 @@ class TestCardDisplayFormat:
                 "target_root_path": "/data/",
                 "target_cluster_name": "dest",
                 "state": "ESTABLISHED",
-                "error_from_last_job": ""
+                "error_from_last_job": "",
             }
         ]
 
@@ -616,7 +655,7 @@ class TestCSVExport:
                 "target_cluster_name": "dest",
                 "state": "ESTABLISHED",
                 "error_from_last_job": "",
-                "recovery_point": "2025-10-21T06:40:30.804453983Z"
+                "recovery_point": "2025-10-21T06:40:30.804453983Z",
             }
         ]
 
@@ -643,7 +682,7 @@ class TestCSVExport:
                 "target_root_path": "/path1/",
                 "target_cluster_name": "dest",
                 "state": "ESTABLISHED",
-                "error_from_last_job": ""
+                "error_from_last_job": "",
             },
             {
                 "id": "src-002",
@@ -651,8 +690,8 @@ class TestCSVExport:
                 "target_root_path": "/path2/",
                 "target_cluster_name": "dest",
                 "state": "REPLICATING",
-                "error_from_last_job": ""
-            }
+                "error_from_last_job": "",
+            },
         ]
 
         fs_api = FakeFileSystemAPI({})
@@ -674,9 +713,9 @@ class TestCSVExport:
                     "target_root_path": "/path3/",
                     "source_cluster_name": "source",
                     "state": "ESTABLISHED",
-                    "error_from_last_job": ""
+                    "error_from_last_job": "",
                 }
-            ]
+            ],
         }
 
         csv_file = tmp_path / "relationships.csv"
@@ -684,7 +723,8 @@ class TestCSVExport:
 
         # Read CSV and verify row count (header + 3 data rows)
         import csv
-        with open(csv_file, 'r') as f:
+
+        with open(csv_file, "r") as f:
             reader = csv.DictReader(f)
             rows = list(reader)
             assert len(rows) == 3  # 2 source + 1 destination
@@ -698,7 +738,7 @@ class TestCSVExport:
                 "target_root_path": "/data/",
                 "target_cluster_name": "dest",
                 "state": "ESTABLISHED",
-                "error_from_last_job": ""
+                "error_from_last_job": "",
             }
         ]
 
@@ -715,7 +755,8 @@ class TestCSVExport:
         rm.save_to_csv(str(csv_file), source_info)
 
         import csv
-        with open(csv_file, 'r') as f:
+
+        with open(csv_file, "r") as f:
             reader = csv.DictReader(f)
             headers = reader.fieldnames
 
