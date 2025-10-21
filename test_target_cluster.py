@@ -52,15 +52,13 @@ class FakeReplicationAPI:
 class FakeClusterAPI:
     """Fake cluster API for getting cluster info"""
 
-    def __init__(self, cluster_name: str = "test-cluster", cluster_id: str = "cluster-123"):
+    def __init__(self, cluster_name: str = "test-cluster"):
         self.cluster_name = cluster_name
-        self.cluster_id = cluster_id
 
     def get_cluster_conf(self) -> Dict[str, str]:
         """Simulate getting cluster configuration"""
         return {
             "cluster_name": self.cluster_name,
-            "cluster_id": self.cluster_id
         }
 
 
@@ -389,7 +387,7 @@ class TestTargetClusterDestinationInfo:
 
         cluster_ips = ["10.120.0.81"]
         repl_api = FakeReplicationAPI(target_relationships)
-        cluster_api = FakeClusterAPI("qwho", "dc611450-c2ba-4073-99a1-4999778f222d")
+        cluster_api = FakeClusterAPI("qwho")
         fake_client = FakeClient({1: cluster_ips}, repl_api, cluster_api)
 
         target = TargetCluster(fake_client, network_id=1)
@@ -397,10 +395,8 @@ class TestTargetClusterDestinationInfo:
 
         # Verify structure
         assert "cluster_name" in dst_info
-        assert "cluster_id" in dst_info
         assert "relationships" in dst_info
         assert dst_info["cluster_name"] == "qwho"
-        assert dst_info["cluster_id"] == "dc611450-c2ba-4073-99a1-4999778f222d"
         assert len(dst_info["relationships"]) == 2
         assert dst_info["relationships"][0]["state"] == "DISCONNECTED"
         assert dst_info["relationships"][1]["state"] == "ESTABLISHED"
@@ -409,14 +405,13 @@ class TestTargetClusterDestinationInfo:
         """Test: get_destination_info handles clusters with no relationships"""
         cluster_ips = ["10.120.0.81"]
         repl_api = FakeReplicationAPI([])
-        cluster_api = FakeClusterAPI("empty-cluster", "empty-123")
+        cluster_api = FakeClusterAPI("empty-cluster")
         fake_client = FakeClient({1: cluster_ips}, repl_api, cluster_api)
 
         target = TargetCluster(fake_client, network_id=1)
         dst_info = target.get_destination_info()
 
         assert dst_info["cluster_name"] == "empty-cluster"
-        assert dst_info["cluster_id"] == "empty-123"
         assert dst_info["relationships"] == []
 
 
