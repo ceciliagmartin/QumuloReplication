@@ -29,7 +29,7 @@ import argparse
 import csv
 import logging
 import sys
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 from qqbase import Client, RestClient, create_credentials
 
 logger = logging.getLogger(__name__)
@@ -315,7 +315,6 @@ class ReplicationManager:
     def __init__(self, client: RestClient) -> None:
         self.client = client.rc
         self.repli_paths = {}
-        self.dst_load = {}
         self.created_replications = {}
 
     def get_source_info(self) -> Dict[str, Any]:
@@ -339,9 +338,9 @@ class ReplicationManager:
             "relationships": source_relationships,
         }
 
-    def get_replication_status(self) -> None:
+    def populate_replication_cache(self) -> None:
         """
-        Populate replication paths and load tracking from source cluster.
+        Populate replication paths cache from source cluster.
         Uses get_source_info() internally for DRY.
         """
         source_info = self.get_source_info()
@@ -357,7 +356,6 @@ class ReplicationManager:
                 "replid": repli.get("id"),
                 "dst": dst_ip,
             }
-            self.dst_load[dst_ip] = 1 + self.dst_load.get(dst_ip, 0)
 
     @staticmethod
     def _truncate_string(s: str, max_len: int) -> str:
@@ -692,10 +690,72 @@ class ReplicationManager:
     def clean_replications(self, basepath):
         """Delete source-side replication relationships under basepath"""
         for path, values in self.repli_paths.items():
+            logger.info(f"Checking to delete {path} vs {basepath}")
             if path.startswith(basepath):
                 rid = values.get("replid")
                 logger.info(f"Clearing replication with {rid} covering folder {path}")
                 self.client.replication.delete_source_relationship(rid)
+
+
+def validate_args(args, client_factory=None) -> Tuple[Optional[Any], Optional[Any]]:
+    """
+    Validate arguments and return (src_client, dst_client) tuple.
+
+    Args:
+        args: Parsed command-line arguments
+        client_factory: Optional factory function for creating clients (for testing)
+
+    Returns:
+        Tuple of (src_client, dst_client) where either can be None
+
+    Raises:
+        ValueError: If required arguments for the action are missing
+    """
+    if client_factory is None:
+        client_factory = Client
+
+    # First, validate required arguments based on action
+    if args.action in ["summary", "create"]:
+        if not args.src_host or not args.src_user:
+            raise ValueError(
+                f"--src_host and --src_user are required for '{args.action}' action"
+            )
+
+    if args.action == "create":
+        if not args.dst_host or not args.dst_user:
+            raise ValueError(
+                f"--dst_host and --dst_user are required for 'create' action"
+            )
+
+    if args.action == "clean":
+        has_src = args.src_host and args.src_user
+        has_dst = args.dst_host and args.dst_user
+        if not has_src and not has_dst:
+            raise ValueError(
+                "'clean' action requires at least src or dst credentials"
+            )
+
+    if args.action == "accept":
+        if not args.dst_host or not args.dst_user:
+            raise ValueError(
+                f"--dst_host and --dst_user are required for 'accept' action"
+            )
+
+    # Now create clients after validation passes
+    src_client = None
+    dst_client = None
+
+    if args.src_host and args.src_user:
+        logger.info(f"Connecting to source cluster {args.src_host}...")
+        src_creds = create_credentials(args.src_host, args.src_user, args.src_password)
+        src_client = client_factory(src_creds)
+
+    if args.dst_host and args.dst_user:
+        logger.info(f"Connecting to destination cluster {args.dst_host}...")
+        dst_creds = create_credentials(args.dst_host, args.dst_user, args.dst_password)
+        dst_client = client_factory(dst_creds)
+
+    return src_client, dst_client
 
 
 def main():
@@ -788,21 +848,27 @@ Examples:
 
     args = parser.parse_args()
 
-    # Validate action-specific required arguments
-    if args.action in ["summary", "create", "clean"]:
-        if not args.src_host or not args.src_user:
-            logger.error(
-                f"--src_host and --src_user are required for '{args.action}' action"
-            )
-            sys.exit(1)
+    # Validate arguments and create clients
+    try:
+        src_client, dst_client = validate_args(args)
+    except ValueError as e:
+        logger.error(str(e))
+        sys.exit(1)
 
-        # Connect to source cluster with password prompt if needed
-        logger.info(f"Connecting to {args.src_host}...")
-        src_creds = create_credentials(args.src_host, args.src_user, args.src_password)
-        src_client = Client(src_creds)
+    # Create managers once after validation
+    rm = None
+    target_cluster = None
+
+    if src_client:
+        rm = ReplicationManager(src_client)
         logger.info(f"Querying base path {args.basepath}")
 
-        rm = ReplicationManager(src_client)
+    if dst_client:
+        target_cluster = TargetCluster(
+            dst_client,
+            user_provided_ips=args.dst,
+            network_id=int(args.dst_network_id),
+        )
 
     if args.action == "summary":
         # Get source info
@@ -810,26 +876,15 @@ Examples:
 
         # Check if user wants destination info as well
         dst_info = None
-        if args.dst_host and args.dst_user:
+        if target_cluster:
             try:
-                logger.info(f"Connecting to destination cluster {args.dst_host}...")
-                dst_creds = create_credentials(
-                    args.dst_host, args.dst_user, args.dst_password
-                )
-                dst_client = Client(dst_creds)
-
-                dst_target = TargetCluster(
-                    dst_client,
-                    user_provided_ips=args.dst,
-                    network_id=int(args.dst_network_id),
-                )
-                dst_info = dst_target.get_destination_info()
+                dst_info = target_cluster.get_destination_info()
                 logger.info(
                     f"Successfully retrieved destination cluster info: {dst_info.get('cluster_name')}"
                 )
             except Exception as e:
                 logger.error(
-                    f"Failed to connect to destination cluster: {type(e).__name__}: {e}"
+                    f"Failed to retrieve destination info: {type(e).__name__}: {e}"
                 )
                 dst_info = None
 
@@ -846,47 +901,23 @@ Examples:
             sys.exit(1)
 
     elif args.action == "create":
-        # Validate required destination parameters
-        if not args.dst_host:
-            logger.error("--dst_host is required for 'create' action")
-            sys.exit(1)
-        if not args.dst_user:
-            logger.error("--dst_user is required for 'create' action")
-            sys.exit(1)
-
-        logger.info(f"Connecting to destination cluster {args.dst_host}...")
-        dst_creds = create_credentials(args.dst_host, args.dst_user, args.dst_password)
-        dst_client = Client(dst_creds)
-
-        # Initialize TargetCluster with optional user-provided IPs and network_id
-        target_cluster = TargetCluster(
-            dst_client, user_provided_ips=args.dst, network_id=int(args.dst_network_id)
-        )
-
+        # Populate repli_paths to avoid creating duplicate replications
+        rm.populate_replication_cache()
         rm.create_replications(
             args.basepath,
             dst=target_cluster,
         )
 
     elif args.action == "clean":
-        # Clean source-side relationships
-        logger.info(f"Cleaning source-side relationships under {args.basepath}")
-        rm.clean_replications(args.basepath)
+        # Clean source-side relationships if src_client provided
+        if src_client:
+            logger.info(f"Cleaning source-side relationships under {args.basepath}")
+            # Populate repli_paths before cleaning (bug fix)
+            rm.populate_replication_cache()
+            rm.clean_replications(args.basepath)
 
-        # Clean destination-side ENDED relationships if dst credentials provided
-        if args.dst_host and args.dst_user:
-            logger.info(f"Connecting to destination cluster {args.dst_host}...")
-            dst_creds = create_credentials(
-                args.dst_host, args.dst_user, args.dst_password
-            )
-            dst_client = Client(dst_creds)
-
-            target_cluster = TargetCluster(
-                dst_client,
-                user_provided_ips=args.dst,
-                network_id=int(args.dst_network_id),
-            )
-
+        # Clean destination-side ENDED relationships if dst_client provided
+        if target_cluster:
             logger.info(
                 f"Cleaning ENDED relationships on destination under {args.basepath}"
             )
@@ -897,33 +928,7 @@ Examples:
                 f"\n✓ Cleaned up {deleted_count} ENDED replication relationship(s) on destination"
             )
 
-        # If neither src nor dst provided, error
-        if not (args.src_host and args.src_user) and not (
-            args.dst_host and args.dst_user
-        ):
-            logger.error(
-                "'clean' action requires --src_host and --src_user (to clean source) and/or --dst_host and --dst_user (to clean ENDED on destination)"
-            )
-            sys.exit(1)
-
     elif args.action == "accept":
-        # Validate required destination parameters
-        if not args.dst_host:
-            logger.error("--dst_host is required for 'accept' action")
-            sys.exit(1)
-        if not args.dst_user:
-            logger.error("--dst_user is required for 'accept' action")
-            sys.exit(1)
-
-        logger.info(f"Connecting to destination cluster {args.dst_host}...")
-        dst_creds = create_credentials(args.dst_host, args.dst_user, args.dst_password)
-        dst_client = Client(dst_creds)
-
-        # Initialize TargetCluster
-        target_cluster = TargetCluster(
-            dst_client, user_provided_ips=args.dst, network_id=int(args.dst_network_id)
-        )
-
         target_cluster.accept_pending_replications(
             allow_non_empty_dir=args.allow_non_empty_dir, confirm=args.confirm
         )
