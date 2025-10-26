@@ -654,11 +654,25 @@ class ReplicationManager:
 
         logger.info(f"Saved replication data to CSV: {filepath}")
 
-    def create_replications(self, basepath: str, dst: "TargetCluster", dst_path: "str"):
+    def create_replications(self, basepath: str, dst: "TargetCluster", dst_path: str = "",
+                           filteri: Optional[List[str]] = None, filtere: Optional[List[str]] = None):
         """
         Creates replication one level deep from basepath
-        returns dict with replications created for tallying
+
+        Args:
+            basepath: Base path to search for directories
+            dst: TargetCluster instance for destination
+            dst_path: Path to prepend to destination (default: "")
+            filteri: Include only directories containing these strings (default: None = all)
+            filtere: Exclude directories containing these strings (default: None = none)
+
+        Returns:
+            dict with replications created for tallying
         """
+        # Normalize dst_path: None or "/" should be treated as empty string
+        if dst_path is None or dst_path == "/":
+            dst_path = ""
+
         first = True
         for entry in self.client.fs.tree_walk_preorder(path=basepath, max_depth=1):
             if first:
@@ -667,6 +681,22 @@ class ReplicationManager:
                 continue
             if entry.get("type") == "FS_FILE_TYPE_DIRECTORY":
                 path = entry.get("path")
+                # Get just the directory name, handling trailing slashes
+                dir_name = path.rstrip("/").split("/")[-1]
+
+                # Apply filters using substring matching
+                # If filteri is specified, only include directories containing any of the patterns
+                if filteri:
+                    if not any(pattern in dir_name for pattern in filteri):
+                        logger.info(f"Skipping {path} - does not match include filter (patterns: {filteri})")
+                        continue
+
+                # If filtere is specified, exclude directories containing any of the patterns
+                if filtere:
+                    if any(pattern in dir_name for pattern in filtere):
+                        logger.info(f"Skipping {path} - matches exclude filter (patterns: {filtere})")
+                        continue
+
                 logger.info(f"Evaluating path {path}")
                 if path not in self.repli_paths:
                     dst_address = dst.get_next_dst_ip()
@@ -680,7 +710,7 @@ class ReplicationManager:
                     replication_id = replication_info.get("id", "")
 
                     logger.info(
-                        f"Created replication relationship {replication_id} on with dst IP: {dst_address} \n dst path {dst_target_path}"
+                        f"Created replication relationship {replication_id} with dst IP: {dst_address}, dst path: {dst_target_path}"
                     )
                     self.created_replications.update(replication_info)
                 else:
@@ -688,14 +718,43 @@ class ReplicationManager:
                         f"Replication already existing in folder {path}. Skipping."
                     )
 
-    def clean_replications(self, basepath):
-        """Delete source-side replication relationships under basepath"""
+    def clean_replications(self, basepath, filteri=None, filtere=None):
+        """
+        Delete source-side replication relationships under basepath
+
+        Args:
+            basepath: Base path to search for replications to delete
+            filteri: Include only directories containing these strings (default: None = all)
+            filtere: Exclude directories containing these strings (default: None = none)
+
+        Returns:
+            Number of relationships deleted
+        """
+        deleted_count = 0
         for path, values in self.repli_paths.items():
             logger.info(f"Checking to delete {path} vs {basepath}")
             if path.startswith(basepath):
+                # Get just the directory name, handling trailing slashes
+                dir_name = path.rstrip("/").split("/")[-1]
+
+                # Apply filters using substring matching (same logic as create)
+                # If filteri is specified, only include directories containing any of the patterns
+                if filteri:
+                    if not any(pattern in dir_name for pattern in filteri):
+                        logger.info(f"Skipping {path} - does not match include filter (patterns: {filteri})")
+                        continue
+
+                # If filtere is specified, exclude directories containing any of the patterns
+                if filtere:
+                    if any(pattern in dir_name for pattern in filtere):
+                        logger.info(f"Skipping {path} - matches exclude filter (patterns: {filtere})")
+                        continue
+
                 rid = values.get("replid")
                 logger.info(f"Clearing replication with {rid} covering folder {path}")
                 self.client.replication.delete_source_relationship(rid)
+                deleted_count += 1
+        return deleted_count
 
 
 def validate_args(args, client_factory=None) -> Tuple[Optional[Any], Optional[Any]]:
@@ -714,6 +773,15 @@ def validate_args(args, client_factory=None) -> Tuple[Optional[Any], Optional[An
     """
     if client_factory is None:
         client_factory = Client
+
+    # Validate filter arguments - filteri and filtere cannot be used together
+    if hasattr(args, 'filteri') and hasattr(args, 'filtere'):
+        if args.filteri and args.filtere:
+            raise ValueError(
+                "Cannot use both --filteri and --filtere together. "
+                "Use --filteri to include only matching directories, "
+                "or --filtere to exclude matching directories."
+            )
 
     # First, validate required arguments based on action
     if args.action in ["summary", "create"]:
@@ -846,7 +914,18 @@ Examples:
         help="Require confirmation before accepting replications (accept action only)",
     )
     # this arg will be used when creating replications to set the dst path
-    parser.add_argument("--dst_path", default=None, help="path to pre-prend when creating relationships")
+    parser.add_argument("--dst_path", default="", help="path to prepend when creating relationships (default: empty, same as source path)")
+    # filter arguments for selective replication
+    parser.add_argument(
+        "--filteri",
+        nargs="+",
+        help="Include ONLY directories containing these strings (e.g., --filteri 'prod' 'staging'). Cannot be used with --filtere."
+    )
+    parser.add_argument(
+        "--filtere",
+        nargs="+",
+        help="Exclude directories containing these strings (e.g., --filtere 'test' 'temp'). Cannot be used with --filteri."
+    )
 
 
     args = parser.parse_args()
@@ -909,7 +988,9 @@ Examples:
         rm.create_replications(
             args.basepath,
             dst=target_cluster,
-            dst_path=args.dst_path
+            dst_path=args.dst_path,
+            filteri=args.filteri,
+            filtere=args.filtere
         )
 
     elif args.action == "clean":
@@ -918,18 +999,25 @@ Examples:
             logger.info(f"Cleaning source-side relationships under {args.basepath}")
             # Populate repli_paths before cleaning (bug fix)
             rm.populate_replication_cache()
-            rm.clean_replications(args.basepath)
+            src_deleted_count = rm.clean_replications(
+                args.basepath,
+                filteri=args.filteri,
+                filtere=args.filtere
+            )
+            logger.info(
+                f"Deleted {src_deleted_count} replication relationship(s) on source"
+            )
 
         # Clean destination-side ENDED relationships if dst_client provided
         if target_cluster:
             logger.info(
                 f"Cleaning ENDED relationships on destination under {args.basepath}"
             )
-            deleted_count = target_cluster.clean_ended_replications(
+            dst_deleted_count = target_cluster.clean_ended_replications(
                 basepath=args.basepath
             )
-            print(
-                f"\n✓ Cleaned up {deleted_count} ENDED replication relationship(s) on destination"
+            logger.info(
+                f"Cleaned up {dst_deleted_count} ENDED replication relationship(s) on destination"
             )
 
     elif args.action == "accept":

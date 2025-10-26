@@ -5,6 +5,8 @@ Automate Qumulo replication setup and management with intelligent load balancing
 ## What It Does
 
 - **Create replications** automatically from source directories to destination cluster
+- **Selective replication** with include/exclude filters (replicate only prod, skip test/temp)
+- **Custom destination paths** for organized backup hierarchies (e.g., `/dr/backups/...`)
 - **Accept pending replications** in bulk on destination cluster
 - **Clean replications** on source and remove ENDED relationships on destination
 - **Balance load** intelligently across destination floating IPs
@@ -66,12 +68,24 @@ python3 replication.py \
 ### Create Replications
 
 ```bash
+# Basic: replicate all directories under /data
 python3 replication.py \
   --src_host src.cluster.com \
   --src_user admin \
   --dst_host dst.cluster.com \
   --dst_user admin \
   --basepath /data \
+  --action create
+
+# Advanced: replicate only production to DR backup path
+python3 replication.py \
+  --src_host src.cluster.com \
+  --src_user admin \
+  --dst_host dst.cluster.com \
+  --dst_user admin \
+  --basepath /data \
+  --dst_path /dr/backups \
+  --filteri "prod" \
   --action create
 ```
 
@@ -191,15 +205,42 @@ Destination cluster (for create/accept, optional for summary):
   --dst_password PASS    Password (prompts if not provided)
 ```
 
-### Other Options
+### Create Options
 
 ```
   --basepath PATH              Directory to replicate (default: /)
+  --dst_path PATH              Prepend path to destination targets (default: empty)
+                               Example: /data/proj with --dst_path /backup → /backup/data/proj
   --dst_network_id ID          Network ID for FIPs (default: 1)
   --dst IP [IP ...]            Use specific destination IPs
   --allow_non_empty_dir        Allow replication to non-empty directories
   --confirm                    Prompt before accepting replications
 ```
+
+### Filtering Options (Create and Clean Actions Only)
+
+Filter which directories to replicate (create) or delete (clean). **Cannot use both filters together.**
+
+**Supported actions:** `create`, `clean`
+**Not supported:** `summary`, `accept` (these show/accept all existing replications)
+
+```
+  --filteri STRING [STRING ...]      Include ONLY directories containing these strings
+                                     Example: --filteri "prod" "staging"
+                                     Use case: Replicate only production/staging dirs
+
+  --filtere STRING [STRING ...]      Exclude directories containing these strings
+                                     Example: --filtere "test" "temp" "cache"
+                                     Use case: Skip test/temporary directories
+
+  No filter (default)                Replicate ALL subdirectories under basepath
+```
+
+**String matching (simple substring search):**
+- `"prod"` matches `prod-db`, `prod-app`, `production`, etc.
+- `"test"` matches `test-db`, `testing`, `my-test`, etc.
+- Case-sensitive matching
+- Matches directory names only, not full paths
 
 ## Examples
 
@@ -287,6 +328,90 @@ python3 replication.py \
 
 Creates replications using only the specified destination IPs.
 
+### Disaster Recovery: Replicate to Backup Path
+
+Use `--dst_path` to prepend a path on the destination cluster, creating a dedicated backup directory structure.
+
+```bash
+# Source /data/prod-db1, /data/prod-db2
+# Destination: /dr/backups/data/prod-db1, /dr/backups/data/prod-db2
+
+python3 replication.py \
+  --src_host src.cluster.com \
+  --src_user admin \
+  --dst_host dst.cluster.com \
+  --dst_user admin \
+  --basepath /data \
+  --dst_path /dr/backups \
+  --action create
+```
+
+**Result:** All subdirectories under `/data` are replicated to `/dr/backups/data/*` on the destination.
+
+### Selective Replication: Include Only Production
+
+Use `--filteri` to replicate ONLY directories containing specific strings.
+
+```bash
+# Only replicate directories containing "prod" or "critical"
+# Skips: test-db, dev-app, staging-cache, etc.
+
+python3 replication.py \
+  --src_host src.cluster.com \
+  --src_user admin \
+  --dst_host dst.cluster.com \
+  --dst_user admin \
+  --basepath /data \
+  --filteri "prod" "critical" \
+  --action create
+```
+
+**Real-world scenario:** You have `/data/prod-db1`, `/data/prod-db2`, `/data/test-db`, `/data/dev-app`. Only `prod-db1` and `prod-db2` are replicated (they contain "prod").
+
+### Selective Replication: Exclude Test/Temp Directories
+
+Use `--filtere` to skip directories you don't want to replicate.
+
+```bash
+# Replicate everything EXCEPT directories containing test, temp, or cache
+
+python3 replication.py \
+  --src_host src.cluster.com \
+  --src_user admin \
+  --dst_host dst.cluster.com \
+  --dst_user admin \
+  --basepath /data \
+  --filtere "test" "temp" "cache" \
+  --action create
+```
+
+**Real-world scenario:** Exclude test databases, temporary files, and cache directories from replication to save bandwidth and storage.
+
+### Combined: Backup Production to DR Site
+
+Combine `--dst_path` and `--filteri` for targeted disaster recovery.
+
+```bash
+# Replicate ONLY production databases to dedicated DR backup path
+# Source: /data/prod-db1, /data/prod-db2
+# Destination: /dr-site/backups/data/prod-db1, /dr-site/backups/data/prod-db2
+
+python3 replication.py \
+  --src_host production.cluster.com \
+  --src_user admin \
+  --dst_host dr.cluster.com \
+  --dst_user admin \
+  --basepath /data \
+  --dst_path /dr-site/backups \
+  --filteri "prod" \
+  --action create
+```
+
+**Benefits:**
+- Only production data replicated (saves time/bandwidth)
+- Organized under dedicated DR path on destination
+- Test/dev/staging directories automatically excluded
+
 ### Clean Replications
 
 The `clean` action intelligently handles cleanup based on which cluster credentials you provide:
@@ -351,6 +476,55 @@ This is safer than putting passwords in command lines (which show up in shell hi
 For automation, you can still provide passwords via CLI arguments.
 
 ## Common Use Cases
+
+### Production-Only Disaster Recovery
+
+Replicate only production databases to a dedicated DR site, excluding test/dev:
+
+```bash
+# Replicate directories containing "prod" to /dr-site/backups
+python3 replication.py \
+  --src_host production.cluster.com \
+  --src_user admin \
+  --dst_host dr.cluster.com \
+  --dst_user admin \
+  --basepath /databases \
+  --dst_path /dr-site/backups \
+  --filteri "prod" \
+  --action create
+```
+
+### Multi-Environment Selective Replication
+
+Replicate both production and staging, but exclude test environments:
+
+```bash
+# Include directories containing "prod" or "staging"
+python3 replication.py \
+  --src_host src.cluster.com \
+  --src_user admin \
+  --dst_host dst.cluster.com \
+  --dst_user admin \
+  --basepath /apps \
+  --filteri "prod" "staging" \
+  --action create
+```
+
+### Exclude Temporary/Cache Directories
+
+Replicate everything except temporary and cache directories:
+
+```bash
+# Skip directories containing temp, cache, or test
+python3 replication.py \
+  --src_host src.cluster.com \
+  --src_user admin \
+  --dst_host dst.cluster.com \
+  --dst_user admin \
+  --basepath /data \
+  --filtere "temp" "cache" "test" \
+  --action create
+```
 
 ### Daily Health Check
 

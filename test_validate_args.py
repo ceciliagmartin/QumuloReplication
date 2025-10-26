@@ -32,6 +32,9 @@ class FakeArgs:
         basepath: str = "/",
         dst: Optional[list] = None,
         dst_network_id: str = "1",
+        dst_path: str = "",
+        filteri: Optional[list] = None,
+        filtere: Optional[list] = None,
     ):
         self.action = action
         self.src_host = src_host
@@ -43,6 +46,9 @@ class FakeArgs:
         self.basepath = basepath
         self.dst = dst
         self.dst_network_id = dst_network_id
+        self.dst_path = dst_path
+        self.filteri = filteri
+        self.filtere = filtere
 
 
 class TestValidateArgsSummaryAction:
@@ -248,6 +254,97 @@ class TestValidateArgsAcceptAction:
             validate_args(args, client_factory=FakeClient)
 
         assert "dst" in str(exc_info.value).lower()
+
+
+class TestValidateArgsFilterValidation:
+    """Test validation for filteri and filtere arguments"""
+
+    def test_filteri_and_filtere_together_raises_error(self):
+        """
+        Test: Using both --filteri and --filtere together raises ValueError
+        AC: Mutual exclusion - cannot use include and exclude filters together
+        """
+        args = FakeArgs(
+            action="create",
+            src_host="src.example.com",
+            src_user="admin",
+            src_password="password123",
+            dst_host="dst.example.com",
+            dst_user="admin",
+            dst_password="password456",
+            filteri=["prod-*"],
+            filtere=["test-*"]
+        )
+
+        with pytest.raises(ValueError) as exc_info:
+            validate_args(args, client_factory=FakeClient)
+
+        assert "filteri" in str(exc_info.value).lower() or "filtere" in str(exc_info.value).lower()
+        assert "both" in str(exc_info.value).lower() or "together" in str(exc_info.value).lower()
+
+    def test_filteri_alone_is_valid(self):
+        """
+        Test: Using --filteri alone is valid for create action
+        AC: Include filter can be used without exclude filter
+        """
+        args = FakeArgs(
+            action="create",
+            src_host="src.example.com",
+            src_user="admin",
+            src_password="password123",
+            dst_host="dst.example.com",
+            dst_user="admin",
+            dst_password="password456",
+            filteri=["prod-*"]
+        )
+
+        # Should not raise
+        src_client, dst_client = validate_args(args, client_factory=FakeClient)
+        assert src_client is not None
+        assert dst_client is not None
+
+    def test_filtere_alone_is_valid(self):
+        """
+        Test: Using --filtere alone is valid for create action
+        AC: Exclude filter can be used without include filter
+        """
+        args = FakeArgs(
+            action="create",
+            src_host="src.example.com",
+            src_user="admin",
+            src_password="password123",
+            dst_host="dst.example.com",
+            dst_user="admin",
+            dst_password="password456",
+            filtere=["test-*", "temp-*"]
+        )
+
+        # Should not raise
+        src_client, dst_client = validate_args(args, client_factory=FakeClient)
+        assert src_client is not None
+        assert dst_client is not None
+
+    def test_no_filters_is_valid(self):
+        """
+        Test: Not providing any filters is valid (default behavior)
+        AC: Replicate all directories when no filters specified
+        """
+        args = FakeArgs(
+            action="create",
+            src_host="src.example.com",
+            src_user="admin",
+            src_password="password123",
+            dst_host="dst.example.com",
+            dst_user="admin",
+            dst_password="password456",
+            filteri=None,
+            filtere=None
+        )
+
+        # Should not raise
+        src_client, dst_client = validate_args(args, client_factory=FakeClient)
+        assert src_client is not None
+        assert dst_client is not None
 
 
 if __name__ == "__main__":
