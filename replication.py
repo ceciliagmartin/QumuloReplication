@@ -654,7 +654,7 @@ class ReplicationManager:
 
         logger.info(f"Saved replication data to CSV: {filepath}")
 
-    def create_replications(self, basepath: str, dst: "TargetCluster"):
+    def create_replications(self, basepath: str, dst: "TargetCluster", dst_path: "str"):
         """
         Creates replication one level deep from basepath
         returns dict with replications created for tallying
@@ -671,15 +671,16 @@ class ReplicationManager:
                 if path not in self.repli_paths:
                     dst_address = dst.get_next_dst_ip()
                     logger.info(f"Using IP {dst_address} to set next replication")
+                    dst_target_path = dst_path+path
                     replication_info = (
                         self.client.replication.create_source_relationship(
-                            address=dst_address, source_path=path, target_path=path
+                            address=dst_address, source_path=path, target_path=dst_target_path
                         )
                     )
                     replication_id = replication_info.get("id", "")
 
                     logger.info(
-                        f"Created replication relationship {replication_id} on with dst IP: {dst_address} \n path {path}"
+                        f"Created replication relationship {replication_id} on with dst IP: {dst_address} \n dst path {dst_target_path}"
                     )
                     self.created_replications.update(replication_info)
                 else:
@@ -799,7 +800,6 @@ Examples:
     parser.add_argument(
         "--src_password", help="Source cluster password (will prompt if not provided)"
     )
-    # Search parameters
     parser.add_argument("--basepath", default="/", help="Directory path to search")
     parser.add_argument(
         "--action", choices=["create", "clean", "summary", "accept"], default="summary"
@@ -845,6 +845,9 @@ Examples:
         action="store_true",
         help="Require confirmation before accepting replications (accept action only)",
     )
+    # this arg will be used when creating replications to set the dst path
+    parser.add_argument("--dst_path", default=None, help="path to pre-prend when creating relationships")
+
 
     args = parser.parse_args()
 
@@ -906,6 +909,7 @@ Examples:
         rm.create_replications(
             args.basepath,
             dst=target_cluster,
+            dst_path=args.dst_path
         )
 
     elif args.action == "clean":
