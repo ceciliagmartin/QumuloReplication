@@ -3,5 +3,5 @@ __pycache__/
 *.pyo
 .pytest_cache/
 *.log
-.DS_Store
-.csv
+*.DS_Store
+*.csv

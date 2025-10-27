@@ -65,18 +65,15 @@ class TargetCluster:
 
     def get_dst_ips(self) -> List[str]:
         """Retrieve all floating IPs from destination cluster"""
-        fip_data = self.client.network.get_floating_ip_allocation()
-        # Find the network matching our network_id
-        matching_network = None
-        for network in fip_data:
-            if network.get("id") == self.network_id:
-                matching_network = network
-                break
+        fip_data = []
+        for fips in self.client.network.list_network_status_v2():
+            fip = fips['network_statuses'][self.network_id]['floating_addresses']
+            if fip: 
+                fip_data.append(fip[0])
+        logger.info(f'Dst cluster FIPs are {fip_data}')
 
-        if not matching_network:
-            raise ValueError(f"Network ID {self.network_id} not found in cluster")
 
-        floating_addresses = matching_network.get("floating_addresses", [])
+        floating_addresses = fip_data 
         if not floating_addresses:
             raise ValueError(
                 f"Network ID {self.network_id} has no Floating IPs available"
@@ -110,7 +107,6 @@ class TargetCluster:
     def get_destination_info(self) -> Dict[str, Any]:
         """
         Retrieve destination cluster information including target relationships.
-
 
         Raises:
             Exception: If cluster configuration or relationships cannot be retrieved
