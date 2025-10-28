@@ -68,27 +68,29 @@ class TargetCluster:
         fip_data = []
 
         for node_status in self.client.network.list_network_status_v2():
-            network_list = node_status['network_statuses']
+            network_list = node_status["network_statuses"]
 
             # Find network by name
             matching_network = None
             for network in network_list:
-                if network.get('name') == self.network_name:
+                if network.get("name") == self.network_name:
                     matching_network = network
                     break
 
             if not matching_network:
-                available = [n.get('name') for n in network_list]
+                available = [n.get("name") for n in network_list]
                 raise ValueError(
                     f"Network '{self.network_name}' not found on node {node_status.get('node_name', 'unknown')}. "
                     f"Available networks: {', '.join(available)}"
                 )
 
-            floating_addresses = matching_network.get('floating_addresses', [])
+            floating_addresses = matching_network.get("floating_addresses", [])
             # Extend fip_data with all FIPs from this node's network
             fip_data.extend(floating_addresses)
 
-        logger.info(f'Using network "{self.network_name}" - Dst cluster FIPs: {fip_data}')
+        logger.info(
+            f'Using network "{self.network_name}" - Dst cluster FIPs: {fip_data}'
+        )
 
         if not fip_data:
             raise ValueError(
@@ -896,9 +898,6 @@ Examples:
     )
     parser.add_argument("--basepath", default="/", help="Directory path to search")
     parser.add_argument(
-        "--action", choices=["create", "clean", "summary", "accept"], default="summary"
-    )
-    parser.add_argument(
         "--format",
         choices=["table", "card"],
         default="table",
@@ -930,7 +929,7 @@ Examples:
         "--dst_network",
         default="Default",
         help="Network name for floating IPs (default: 'Default'). "
-             "View available networks in the Qumulo web UI under Cluster > Network."
+        "View available networks in the Qumulo web UI under Cluster > Network.",
     )
     parser.add_argument(
         "--allow_non_empty_dir",
@@ -958,6 +957,9 @@ Examples:
         "--filtere",
         nargs="+",
         help="Exclude directories containing these strings (e.g., --filtere 'test' 'temp'). Cannot be used with --filteri.",
+    )
+    parser.add_argument(
+        "--action", choices=["create", "clean", "summary", "accept"], default="summary"
     )
 
     args = parser.parse_args()
