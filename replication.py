@@ -43,12 +43,12 @@ class TargetCluster:
         self,
         client: RestClient,
         user_provided_ips: Optional[List[str]] = None,
-        network_id: Optional[int] = 1,
+        network_name: str = "Default",
     ) -> None:
         self.client = client.rc
         self.dst_load = {}
         self.available_ips = []
-        self.network_id = network_id
+        self.network_name = network_name
 
         if user_provided_ips:
             self.available_ips = self._validate_ips(user_provided_ips)
@@ -64,22 +64,38 @@ class TargetCluster:
             )
 
     def get_dst_ips(self) -> List[str]:
-        """Retrieve all floating IPs from destination cluster"""
+        """Retrieve all floating IPs from destination cluster by network name"""
         fip_data = []
-        for fips in self.client.network.list_network_status_v2():
-            fip = fips['network_statuses'][self.network_id]['floating_addresses']
-            if fip: 
-                fip_data.append(fip[0])
-        logger.info(f'Dst cluster FIPs are {fip_data}')
 
+        for node_status in self.client.network.list_network_status_v2():
+            network_list = node_status['network_statuses']
 
-        floating_addresses = fip_data 
-        if not floating_addresses:
+            # Find network by name
+            matching_network = None
+            for network in network_list:
+                if network.get('name') == self.network_name:
+                    matching_network = network
+                    break
+
+            if not matching_network:
+                available = [n.get('name') for n in network_list]
+                raise ValueError(
+                    f"Network '{self.network_name}' not found on node {node_status.get('node_name', 'unknown')}. "
+                    f"Available networks: {', '.join(available)}"
+                )
+
+            floating_addresses = matching_network.get('floating_addresses', [])
+            # Extend fip_data with all FIPs from this node's network
+            fip_data.extend(floating_addresses)
+
+        logger.info(f'Using network "{self.network_name}" - Dst cluster FIPs: {fip_data}')
+
+        if not fip_data:
             raise ValueError(
-                f"Network ID {self.network_id} has no Floating IPs available"
+                f"Network '{self.network_name}' has no Floating IPs available"
             )
 
-        return floating_addresses
+        return fip_data
 
     def _validate_ips(self, user_ips: List[str]) -> List[str]:
         """Validate that user-provided IPs exist in cluster FIPs"""
@@ -650,8 +666,14 @@ class ReplicationManager:
 
         logger.info(f"Saved replication data to CSV: {filepath}")
 
-    def create_replications(self, basepath: str, dst: "TargetCluster", dst_path: str = "",
-                           filteri: Optional[List[str]] = None, filtere: Optional[List[str]] = None):
+    def create_replications(
+        self,
+        basepath: str,
+        dst: "TargetCluster",
+        dst_path: str = "",
+        filteri: Optional[List[str]] = None,
+        filtere: Optional[List[str]] = None,
+    ):
         """
         Creates replication one level deep from basepath
 
@@ -684,23 +706,29 @@ class ReplicationManager:
                 # If filteri is specified, only include directories containing any of the patterns
                 if filteri:
                     if not any(pattern in dir_name for pattern in filteri):
-                        logger.info(f"Skipping {path} - does not match include filter (patterns: {filteri})")
+                        logger.info(
+                            f"Skipping {path} - does not match include filter (patterns: {filteri})"
+                        )
                         continue
 
                 # If filtere is specified, exclude directories containing any of the patterns
                 if filtere:
                     if any(pattern in dir_name for pattern in filtere):
-                        logger.info(f"Skipping {path} - matches exclude filter (patterns: {filtere})")
+                        logger.info(
+                            f"Skipping {path} - matches exclude filter (patterns: {filtere})"
+                        )
                         continue
 
                 logger.info(f"Evaluating path {path}")
                 if path not in self.repli_paths:
                     dst_address = dst.get_next_dst_ip()
                     logger.info(f"Using IP {dst_address} to set next replication")
-                    dst_target_path = dst_path+path
+                    dst_target_path = dst_path + path
                     replication_info = (
                         self.client.replication.create_source_relationship(
-                            address=dst_address, source_path=path, target_path=dst_target_path
+                            address=dst_address,
+                            source_path=path,
+                            target_path=dst_target_path,
                         )
                     )
                     replication_id = replication_info.get("id", "")
@@ -737,13 +765,17 @@ class ReplicationManager:
                 # If filteri is specified, only include directories containing any of the patterns
                 if filteri:
                     if not any(pattern in dir_name for pattern in filteri):
-                        logger.info(f"Skipping {path} - does not match include filter (patterns: {filteri})")
+                        logger.info(
+                            f"Skipping {path} - does not match include filter (patterns: {filteri})"
+                        )
                         continue
 
                 # If filtere is specified, exclude directories containing any of the patterns
                 if filtere:
                     if any(pattern in dir_name for pattern in filtere):
-                        logger.info(f"Skipping {path} - matches exclude filter (patterns: {filtere})")
+                        logger.info(
+                            f"Skipping {path} - matches exclude filter (patterns: {filtere})"
+                        )
                         continue
 
                 rid = values.get("replid")
@@ -771,7 +803,7 @@ def validate_args(args, client_factory=None) -> Tuple[Optional[Any], Optional[An
         client_factory = Client
 
     # Validate filter arguments - filteri and filtere cannot be used together
-    if hasattr(args, 'filteri') and hasattr(args, 'filtere'):
+    if hasattr(args, "filteri") and hasattr(args, "filtere"):
         if args.filteri and args.filtere:
             raise ValueError(
                 "Cannot use both --filteri and --filtere together. "
@@ -796,9 +828,7 @@ def validate_args(args, client_factory=None) -> Tuple[Optional[Any], Optional[An
         has_src = args.src_host and args.src_user
         has_dst = args.dst_host and args.dst_user
         if not has_src and not has_dst:
-            raise ValueError(
-                "'clean' action requires at least src or dst credentials"
-            )
+            raise ValueError("'clean' action requires at least src or dst credentials")
 
     if args.action == "accept":
         if not args.dst_host or not args.dst_user:
@@ -897,7 +927,10 @@ Examples:
         help="Destination cluster password (will prompt if not provided)",
     )
     parser.add_argument(
-        "--dst_network_id", default="1", help="Network ID for floating IPs (default: 1)"
+        "--dst_network",
+        default="Default",
+        help="Network name for floating IPs (default: 'Default'). "
+             "View available networks in the Qumulo web UI under Cluster > Network."
     )
     parser.add_argument(
         "--allow_non_empty_dir",
@@ -910,19 +943,22 @@ Examples:
         help="Require confirmation before accepting replications (accept action only)",
     )
     # this arg will be used when creating replications to set the dst path
-    parser.add_argument("--dst_path", default="", help="path to prepend when creating relationships (default: empty, same as source path)")
+    parser.add_argument(
+        "--dst_path",
+        default="",
+        help="path to prepend when creating relationships (default: empty, same as source path)",
+    )
     # filter arguments for selective replication
     parser.add_argument(
         "--filteri",
         nargs="+",
-        help="Include ONLY directories containing these strings (e.g., --filteri 'prod' 'staging'). Cannot be used with --filtere."
+        help="Include ONLY directories containing these strings (e.g., --filteri 'prod' 'staging'). Cannot be used with --filtere.",
     )
     parser.add_argument(
         "--filtere",
         nargs="+",
-        help="Exclude directories containing these strings (e.g., --filtere 'test' 'temp'). Cannot be used with --filteri."
+        help="Exclude directories containing these strings (e.g., --filtere 'test' 'temp'). Cannot be used with --filteri.",
     )
-
 
     args = parser.parse_args()
 
@@ -945,7 +981,7 @@ Examples:
         target_cluster = TargetCluster(
             dst_client,
             user_provided_ips=args.dst,
-            network_id=int(args.dst_network_id),
+            network_name=args.dst_network,
         )
 
     if args.action == "summary":
@@ -986,7 +1022,7 @@ Examples:
             dst=target_cluster,
             dst_path=args.dst_path,
             filteri=args.filteri,
-            filtere=args.filtere
+            filtere=args.filtere,
         )
 
     elif args.action == "clean":
@@ -996,9 +1032,7 @@ Examples:
             # Populate repli_paths before cleaning (bug fix)
             rm.populate_replication_cache()
             src_deleted_count = rm.clean_replications(
-                args.basepath,
-                filteri=args.filteri,
-                filtere=args.filtere
+                args.basepath, filteri=args.filteri, filtere=args.filtere
             )
             logger.info(
                 f"Deleted {src_deleted_count} replication relationship(s) on source"

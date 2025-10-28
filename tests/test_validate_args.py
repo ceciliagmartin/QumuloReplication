@@ -273,14 +273,20 @@ class TestValidateArgsFilterValidation:
             dst_user="admin",
             dst_password="password456",
             filteri=["prod-*"],
-            filtere=["test-*"]
+            filtere=["test-*"],
         )
 
         with pytest.raises(ValueError) as exc_info:
             validate_args(args, client_factory=FakeClient)
 
-        assert "filteri" in str(exc_info.value).lower() or "filtere" in str(exc_info.value).lower()
-        assert "both" in str(exc_info.value).lower() or "together" in str(exc_info.value).lower()
+        assert (
+            "filteri" in str(exc_info.value).lower()
+            or "filtere" in str(exc_info.value).lower()
+        )
+        assert (
+            "both" in str(exc_info.value).lower()
+            or "together" in str(exc_info.value).lower()
+        )
 
     def test_filteri_alone_is_valid(self):
         """
@@ -295,7 +301,7 @@ class TestValidateArgsFilterValidation:
             dst_host="dst.example.com",
             dst_user="admin",
             dst_password="password456",
-            filteri=["prod-*"]
+            filteri=["prod-*"],
         )
 
         # Should not raise
@@ -316,7 +322,7 @@ class TestValidateArgsFilterValidation:
             dst_host="dst.example.com",
             dst_user="admin",
             dst_password="password456",
-            filtere=["test-*", "temp-*"]
+            filtere=["test-*", "temp-*"],
         )
 
         # Should not raise
@@ -338,7 +344,7 @@ class TestValidateArgsFilterValidation:
             dst_user="admin",
             dst_password="password456",
             filteri=None,
-            filtere=None
+            filtere=None,
         )
 
         # Should not raise

@@ -211,8 +211,9 @@ Destination cluster (for create/accept, optional for summary):
   --basepath PATH              Directory to replicate (default: /)
   --dst_path PATH              Prepend path to destination targets (default: empty)
                                Example: /data/proj with --dst_path /backup → /backup/data/proj
-  --dst_network_id ID          Network ID for FIPs (default: 1)
-  --dst IP [IP ...]            Use specific destination IPs
+  --dst_network NAME           Network name for FIPs (default: "Default")
+                               Use network name from Qumulo UI (Cluster > Network)
+  --dst IP [IP ...]            Use specific destination IPs (overrides --dst_network)
   --allow_non_empty_dir        Allow replication to non-empty directories
   --confirm                    Prompt before accepting replications
 ```
@@ -313,9 +314,26 @@ Accept all 3 replication(s)? (yes/no): yes
 Successfully accepted 3 of 3 replication relationship(s)
 ```
 
+### Create with Specific Network
+
+```bash
+# Use a specific network (e.g., "production" network)
+python3 replication.py \
+  --src_host src.cluster.com \
+  --src_user admin \
+  --dst_host dst.cluster.com \
+  --dst_user admin \
+  --basepath /data/project \
+  --dst_network "production" \
+  --action create
+```
+
+Uses floating IPs from the named network. See network names in Qumulo UI under **Cluster > Network**.
+
 ### Create with Specific IPs
 
 ```bash
+# Override network discovery and use specific IPs
 python3 replication.py \
   --src_host src.cluster.com \
   --src_user admin \
@@ -326,7 +344,7 @@ python3 replication.py \
   --action create
 ```
 
-Creates replications using only the specified destination IPs.
+Creates replications using only the specified destination IPs (bypasses `--dst_network`).
 
 ### Disaster Recovery: Replicate to Backup Path
 
@@ -577,10 +595,14 @@ Then parse the CSV with your monitoring tool.
 --action accept --allow_non_empty_dir
 ```
 
-**"Network ID not found"**
+**"Network 'xyz' not found" or wrong network**
 ```bash
-# Specify correct network ID
---dst_network_id 2
+# Use the exact network name from Qumulo UI (case-sensitive)
+# Go to Cluster > Network to see available network names
+--dst_network "production"
+
+# Or for multiple networks, use the correct name:
+--dst_network "Default"  # Most common (capital D)
 ```
 
 **Long paths truncated in table**
