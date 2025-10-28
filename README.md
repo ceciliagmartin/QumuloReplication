@@ -5,165 +5,39 @@ Automate Qumulo replication setup and management with intelligent load balancing
 ## What It Does
 
 - **Create replications** automatically from source directories to destination cluster
-- **Selective replication** with include/exclude filters (replicate only prod, skip test/temp)
-- **Custom destination paths** for organized backup hierarchies (e.g., `/dr/backups/...`)
+  - **Selective replication** with include/exclude filters (replicate only prod, skip test/temp)
+  - **Custom destination paths** for organized backup hierarchies (e.g., `/dr/backups/...`)
+  - **Balance load** intelligently across destination floating IPs
 - **Accept pending replications** in bulk on destination cluster
 - **Clean replications** on source and remove ENDED relationships on destination
-- **Balance load** intelligently across destination floating IPs
-- **View status** with multiple display formats (table, card, CSV)
-- **Export to CSV** for analysis in Excel/Google Sheets
+  - **Set paths read-only** before deletion (optional, for clean action)
+- **Summarize replication status** with multiple display formats (table, card, CSV)
+  - **Export to CSV** for analysis in Excel/Google Sheets with pandas
+
+Any action creates a **timestamped log** for audit trails
 
 ## Quick Start
 
 ### Actions
 
-| Action | What it does | Required Arguments |
-|--------|-------------|-------------------|
-| `summary` | Show replication status (supports --format and --csv) | `--src_host`, `--src_user` |
-| `create` | Create new replications from source to destination | `--src_host`, `--src_user`, `--dst_host`, `--dst_user`, `--basepath` |
-| `accept` | Accept pending replications on destination | `--dst_host`, `--dst_user` |
-| `clean` | Delete replications (source-side) and/or clean ENDED relationships (destination-side) | Source: `--src_host`, `--src_user` / Destination: `--dst_host`, `--dst_user` (can use both) |
+| Action | What it does | Required Arguments | Optional Arguments |
+|--------|-------------|-------------------|-------------------|
+| `summary` | Show replication status (supports --format and --csv) | `--src_host`, `--src_user` | `--dst_host`, `--dst_user` (to show both clusters)<br>`--format` (table/card)<br>`--csv` (export path)<br>`--csv-only` (no screen output)<br>`--dst_network` (network name) |
+| `create` | Create new replications from source to destination | `--src_host`, `--src_user`, `--dst_host`, `--dst_user`, `--basepath` | `--dst_path` (path prepend)<br>`--filteri` (include filter)<br>`--filtere` (exclude filter)<br>`--dst_network` (network name)<br>`--dst` (specific FIPs) |
+| `accept` | Accept pending replications on destination | `--dst_host`, `--dst_user` | `--allow_non_empty_dir`<br>`--confirm` (require confirmation)<br>`--dst_network` (network name) |
+| `clean` | Delete replications (source-side) and/or clean ENDED relationships (destination-side) | At least one: `--src_host`+`--src_user` OR `--dst_host`+`--dst_user` | `--basepath` (default: /)<br>`--filteri` (include filter)<br>`--filtere` (exclude filter)<br>`--set_readonly` (set paths read-only before deletion)<br>`--dst_network` (network name) |
 
-### View Replication Status
-
-```bash
-# Source cluster only (table format)
-python3 replication.py \
-  --src_host src.cluster.com \
-  --src_user admin \
-  --action summary
-
-# Source + Destination (both clusters)
-python3 replication.py \
-  --src_host src.cluster.com \
-  --src_user admin \
-  --dst_host dst.cluster.com \
-  --dst_user admin \
-  --action summary
-
-# Card format (easier to read for health checks)
-python3 replication.py \
-  --src_host src.cluster.com \
-  --src_user admin \
-  --action summary \
-  --format card
-
-# Export to CSV
-python3 replication.py \
-  --src_host src.cluster.com \
-  --src_user admin \
-  --action summary \
-  --csv status.csv
-```
-
-### Accept Pending Replications
-
-```bash
-python3 replication.py \
-  --dst_host dst.cluster.com \
-  --dst_user admin \
-  --action accept
-```
-
-### Create Replications
-
-```bash
-# Basic: replicate all directories under /data
-python3 replication.py \
-  --src_host src.cluster.com \
-  --src_user admin \
-  --dst_host dst.cluster.com \
-  --dst_user admin \
-  --basepath /data \
-  --action create
-
-# Advanced: replicate only production to DR backup path
-python3 replication.py \
-  --src_host src.cluster.com \
-  --src_user admin \
-  --dst_host dst.cluster.com \
-  --dst_user admin \
-  --basepath /data \
-  --dst_path /dr/backups \
-  --filteri "prod" \
-  --action create
-```
+**Note:** All actions support `--src_password` and `--dst_password` (will prompt if not provided). Logs are automatically saved to timestamped file in current directory.
 
 ## Installation
 
 ```bash
 pip install qumulo-api
-git clone <repo-url>
-cd qrepli
-```
+git clone https://github.com/ceciliagmartin/QumuloReplication
+cd QumuloReplication
 
-## Display Formats
-
-### Table Format (Default)
-
-Fixed-width columns, truncated paths for readability:
-
-```
-==================================================================================================================================
-Source Cluster Summary:
-==================================================================================================================================
-Cluster Name: qtest
-Cluster ID: fb9119f3-9ecd-4110-b6c4-44f65ecec3...
-Total Relationships: 2
-
-Source Path                         | Target Path                         | State           | Target Cluster      | ID (truncated)
-------------------------------------------------------------------------------------------------------------------------------------
-/snapz/                             | /snapz/                             | ESTABLISHED     | qwhat               | 93874ed3-9c03-49
-/Users/                             | /Users/                             | ESTABLISHED     | qwho                | b3b7d559-e89c-43
-
-State                     | Count
---------------------------------------
-ESTABLISHED               | 2
-```
-
-### Card Format (Best for Health Checks)
-
-Visual indicators, prominent error display:
-
-```
-====================================================================================================
-Source Cluster Summary:
-====================================================================================================
-Cluster: qtest (fb9119f3-9ecd-41...)
-Total Relationships: 2
-
-▸ /snapz/ → qwhat:/snapz/
-  State: ESTABLISHED ✗
-  ID: 93874ed3-9c03-49...
-  ⚠ Error: Target cluster error: Snapshot limit of 40000 has been reached.
-  Recovery Point: 2025-09-25 13:10:00
-  Queued Snapshots: 2102
-  Mode: Snapshot Policy
-
-▸ /Users/ → qwho:/Users/
-  State: ESTABLISHED ✓
-  ID: b3b7d559-e89c-43...
-  Recovery Point: 2025-10-21 06:40:30
-  Mode: Continuous
-
-State Summary:
-  ✓ ESTABLISHED: 2
-```
-
-**Card Format Icons:**
-- `✓` = Healthy (ESTABLISHED, no errors)
-- `⟳` = In progress (REPLICATING, CREATING)
-- `✗` = Problem (errors, DISCONNECTED)
-- `⚠` = Warning (other states)
-
-### CSV Export
-
-Full data with no truncation, ready for Excel/analysis:
-
-```csv
-cluster_type,cluster_name,cluster_id,source_path,target_path,remote_cluster,state,replication_id,error,recovery_point,queued_snapshots,replication_mode
-Source,qtest,fb9119f3-9ecd-4110-b6c4-44f65ecec31f,/snapz/,/snapz/,qwhat,ESTABLISHED,93874ed3-9c03-49a4-a628-778b4b5d831d,Target cluster error: Snapshot limit,2025-09-25T13:10:00.000439663Z,2102,REPLICATION_SNAPSHOT_POLICY
-Source,qtest,fb9119f3-9ecd-4110-b6c4-44f65ecec31f,/Users/,/Users/,qwho,ESTABLISHED,b3b7d559-e89c-4323-a408-efeb38f60eb6,,2025-10-21T06:40:30.804453983Z,0,REPLICATION_CONTINUOUS
+# Install dependencies
+pip install -r requirements.txt
 ```
 
 ## Usage
@@ -245,19 +119,18 @@ Filter which directories to replicate (create) or delete (clean). **Cannot use b
 
 ## Examples
 
-### Quick Health Check (Card Format)
+### Summary - Status Check before creating new replications
 
 ```bash
 python3 replication.py \
   --src_host src.cluster.com \
   --src_user admin \
+  --dst_host dst.cluster.com \
+  --dst_user admin \
   --action summary \
-  --format card
 ```
 
-Shows errors prominently with ⚠ indicators.
-
-### Export Status to CSV
+### Summary - Export Status to CSV
 
 ```bash
 # Display on screen AND save to CSV
@@ -266,54 +139,7 @@ python3 replication.py \
   --src_user admin \
   --action summary \
   --csv replication_status.csv
-
-# Export ONLY (no screen output, good for cron jobs)
-python3 replication.py \
-  --src_host src.cluster.com \
-  --src_user admin \
-  --action summary \
-  --csv status.csv \
-  --csv-only
 ```
-
-### Compare Source and Destination
-
-```bash
-python3 replication.py \
-  --src_host src.cluster.com \
-  --src_user admin \
-  --dst_host dst.cluster.com \
-  --dst_user admin \
-  --action summary \
-  --format card
-```
-
-Shows both clusters in readable card format.
-
-### Accept with Confirmation
-
-```bash
-python3 replication.py \
-  --dst_host dst.cluster.com \
-  --dst_user admin \
-  --action accept \
-  --confirm
-```
-
-Shows:
-```
-Found 3 pending replication relationship(s):
-  ID: abc-123
-  Source Cluster: production
-  Source Path: /data/critical/
-  Target Path: /data/critical/
-  State: AWAITING_AUTHORIZATION
-
-Accept all 3 replication(s)? (yes/no): yes
-
-Successfully accepted 3 of 3 replication relationship(s)
-```
-
 ### Create with Specific Network
 
 ```bash
@@ -345,6 +171,32 @@ python3 replication.py \
 ```
 
 Creates replications using only the specified destination IPs (bypasses `--dst_network`).
+
+### Clean up replications (optional --set_read-only)
+```bash
+# Use a specific IPs
+python3 replication.py \
+  --src_host src.cluster.com \
+  --src_user admin \
+  --dst_host dst.cluster.com \
+  --dst_user admin \
+  --basepath /data/project \
+  --dst dst.cluster.com \
+  --action clean
+```
+
+Deletes replication in source and cleans Ended in destination. If --set_read-only passed the src folders will be set to read only.
+
+
+### Accept pending relationships on dst cluster. Use --confirm for more control
+
+```bash
+python3 replication.py \
+  --dst_host dst.cluster.com \
+  --dst_user admin \
+  --action accept \
+  --confirm
+```
 
 ### Disaster Recovery: Replicate to Backup Path
 
@@ -447,6 +299,14 @@ python3 replication.py \
   --src_host src.cluster.com \
   --src_user admin \
   --basepath /data/project \
+  --action clean
+
+# Clean and set paths to read-only before deletion (prevents accidental writes)
+python3 replication.py \
+  --src_host src.cluster.com \
+  --src_user admin \
+  --basepath /data/project \
+  --set_readonly \
   --action clean
 
 # Clean destination-side ENDED relationships only
