@@ -32,11 +32,13 @@ class FakeNetworkAPI:
 
         Returns: [{'node_id': 1, 'node_name': 'node-1', 'network_statuses': [...]}]
         """
-        return [{
-            "node_id": 1,
-            "node_name": "fake-node-1",
-            "network_statuses": self.networks
-        }]
+        return [
+            {
+                "node_id": 1,
+                "node_name": "fake-node-1",
+                "network_statuses": self.networks,
+            }
+        ]
 
 
 class FakeReplicationAPI:
@@ -96,7 +98,9 @@ class TestTargetClusterInitialization:
     def test_init_with_multiple_cluster_fips(self):
         """Test initialization using all cluster FIPs (no user-provided IPs)"""
         cluster_ips = ["10.1.1.20", "10.1.1.21", "10.1.1.22"]
-        fake_client = FakeClient([{"name": "Default", "floating_addresses": cluster_ips}])
+        fake_client = FakeClient(
+            [{"name": "Default", "floating_addresses": cluster_ips}]
+        )
 
         target = TargetCluster(fake_client, network_name="Default")
 
@@ -108,9 +112,13 @@ class TestTargetClusterInitialization:
         """Test initialization with user-provided IPs that exist in cluster"""
         cluster_ips = ["10.1.1.20", "10.1.1.21", "10.1.1.22", "10.1.1.23"]
         user_ips = ["10.1.1.21", "10.1.1.22"]
-        fake_client = FakeClient([{"name": "Default", "floating_addresses": cluster_ips}])
+        fake_client = FakeClient(
+            [{"name": "Default", "floating_addresses": cluster_ips}]
+        )
 
-        target = TargetCluster(fake_client, user_provided_ips=user_ips, network_name="Default")
+        target = TargetCluster(
+            fake_client, user_provided_ips=user_ips, network_name="Default"
+        )
 
         assert target.available_ips == user_ips
         assert all(target.dst_load[ip] == 0 for ip in user_ips)
@@ -120,7 +128,9 @@ class TestTargetClusterInitialization:
         """Test initialization with single IP logs warning"""
         cluster_ips = ["10.1.1.20", "10.1.1.21"]
         user_ips = ["10.1.1.20"]
-        fake_client = FakeClient([{"name": "Default", "floating_addresses": cluster_ips}])
+        fake_client = FakeClient(
+            [{"name": "Default", "floating_addresses": cluster_ips}]
+        )
 
         with caplog.at_level(logging.WARNING):
             target = TargetCluster(
@@ -134,10 +144,14 @@ class TestTargetClusterInitialization:
         """Test that invalid user IPs cause immediate failure"""
         cluster_ips = ["10.1.1.20", "10.1.1.21"]
         user_ips = ["10.1.1.99", "10.1.1.100"]
-        fake_client = FakeClient([{"name": "Default", "floating_addresses": cluster_ips}])
+        fake_client = FakeClient(
+            [{"name": "Default", "floating_addresses": cluster_ips}]
+        )
 
         with pytest.raises(ValueError) as exc_info:
-            TargetCluster(fake_client, user_provided_ips=user_ips, network_name="Default")
+            TargetCluster(
+                fake_client, user_provided_ips=user_ips, network_name="Default"
+            )
 
         assert "Invalid destination IPs" in str(exc_info.value)
         assert "10.1.1.99" in str(exc_info.value)
@@ -147,10 +161,14 @@ class TestTargetClusterInitialization:
         """Test that even one invalid IP causes failure"""
         cluster_ips = ["10.1.1.20", "10.1.1.21"]
         user_ips = ["10.1.1.20", "10.1.1.99"]  # One valid, one invalid
-        fake_client = FakeClient([{"name": "Default", "floating_addresses": cluster_ips}])
+        fake_client = FakeClient(
+            [{"name": "Default", "floating_addresses": cluster_ips}]
+        )
 
         with pytest.raises(ValueError) as exc_info:
-            TargetCluster(fake_client, user_provided_ips=user_ips, network_name="Default")
+            TargetCluster(
+                fake_client, user_provided_ips=user_ips, network_name="Default"
+            )
 
         assert "10.1.1.99" in str(exc_info.value)
 
@@ -165,7 +183,9 @@ class TestTargetClusterInitialization:
 
     def test_init_with_invalid_network_name(self):
         """Test that invalid network_name causes failure"""
-        fake_client = FakeClient([{"name": "Default", "floating_addresses": ["10.1.1.20", "10.1.1.21"]}])
+        fake_client = FakeClient(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20", "10.1.1.21"]}]
+        )
 
         with pytest.raises(ValueError) as exc_info:
             TargetCluster(fake_client, network_name="nonexistent")
@@ -179,7 +199,9 @@ class TestTargetClusterLoadBalancing:
     def test_get_next_dst_ip_round_robin_on_equal_load(self):
         """Test that with equal load, IPs are selected fairly"""
         cluster_ips = ["10.1.1.20", "10.1.1.21", "10.1.1.22"]
-        fake_client = FakeClient([{"name": "Default", "floating_addresses": cluster_ips}])
+        fake_client = FakeClient(
+            [{"name": "Default", "floating_addresses": cluster_ips}]
+        )
         target = TargetCluster(fake_client, network_name="Default")
 
         # Get 9 IPs (3 rounds)
@@ -195,7 +217,9 @@ class TestTargetClusterLoadBalancing:
     def test_get_next_dst_ip_selects_least_used(self):
         """Test that the IP with minimum load is always selected"""
         cluster_ips = ["10.1.1.20", "10.1.1.21", "10.1.1.22"]
-        fake_client = FakeClient([{"name": "Default", "floating_addresses": cluster_ips}])
+        fake_client = FakeClient(
+            [{"name": "Default", "floating_addresses": cluster_ips}]
+        )
         target = TargetCluster(fake_client, network_name="Default")
 
         # Manually set unequal load
@@ -220,7 +244,9 @@ class TestTargetClusterLoadBalancing:
     def test_load_balancing_with_initial_load(self):
         """Test that initial load state is respected"""
         cluster_ips = ["10.1.1.20", "10.1.1.21"]
-        fake_client = FakeClient([{"name": "Default", "floating_addresses": cluster_ips}])
+        fake_client = FakeClient(
+            [{"name": "Default", "floating_addresses": cluster_ips}]
+        )
         target = TargetCluster(fake_client, network_name="Default")
 
         # Simulate existing replications
@@ -247,7 +273,9 @@ class TestTargetClusterFIPRetrieval:
     def test_get_dst_ips_returns_all_fips(self):
         """Test that get_dst_ips retrieves all cluster FIPs"""
         cluster_ips = ["10.1.1.20", "10.1.1.21", "10.1.1.22", "10.1.1.23"]
-        fake_client = FakeClient([{"name": "Default", "floating_addresses": cluster_ips}])
+        fake_client = FakeClient(
+            [{"name": "Default", "floating_addresses": cluster_ips}]
+        )
         target = TargetCluster(fake_client, network_name="Default")
 
         retrieved_ips = target.get_dst_ips()
@@ -266,10 +294,15 @@ class TestTargetClusterFIPRetrieval:
 
     def test_get_dst_ips_from_multiple_networks(self):
         """Test that get_dst_ips retrieves FIPs from correct network"""
-        fake_client = FakeClient([
-            {"name": "Default", "floating_addresses": ["10.1.1.20", "10.1.1.21"]},
-            {"name": "production", "floating_addresses": ["10.2.2.30", "10.2.2.31", "10.2.2.32"]}
-        ])
+        fake_client = FakeClient(
+            [
+                {"name": "Default", "floating_addresses": ["10.1.1.20", "10.1.1.21"]},
+                {
+                    "name": "production",
+                    "floating_addresses": ["10.2.2.30", "10.2.2.31", "10.2.2.32"],
+                },
+            ]
+        )
         target = TargetCluster(fake_client, network_name="production")
 
         retrieved_ips = target.get_dst_ips()
@@ -284,7 +317,9 @@ class TestTargetClusterIntegration:
     def test_typical_workflow_all_cluster_fips(self):
         """Test typical workflow: use all cluster FIPs for load balancing"""
         cluster_ips = ["10.1.1.20", "10.1.1.21", "10.1.1.22"]
-        fake_client = FakeClient([{"name": "Default", "floating_addresses": cluster_ips}])
+        fake_client = FakeClient(
+            [{"name": "Default", "floating_addresses": cluster_ips}]
+        )
 
         # Initialize without user IPs
         target = TargetCluster(fake_client, network_name="Default")
@@ -301,10 +336,14 @@ class TestTargetClusterIntegration:
         """Test typical workflow: user specifies subset of FIPs"""
         cluster_ips = ["10.1.1.20", "10.1.1.21", "10.1.1.22", "10.1.1.23", "10.1.1.24"]
         user_ips = ["10.1.1.21", "10.1.1.23"]
-        fake_client = FakeClient([{"name": "Default", "floating_addresses": cluster_ips}])
+        fake_client = FakeClient(
+            [{"name": "Default", "floating_addresses": cluster_ips}]
+        )
 
         # Initialize with subset
-        target = TargetCluster(fake_client, user_provided_ips=user_ips, network_name="Default")
+        target = TargetCluster(
+            fake_client, user_provided_ips=user_ips, network_name="Default"
+        )
 
         # Create 10 replications
         assignments = [target.get_next_dst_ip() for _ in range(10)]
@@ -318,7 +357,9 @@ class TestTargetClusterIntegration:
     def test_workflow_with_existing_replication_load(self):
         """Test workflow starting with existing replications (unbalanced load)"""
         cluster_ips = ["10.1.1.20", "10.1.1.21", "10.1.1.22"]
-        fake_client = FakeClient([{"name": "Default", "floating_addresses": cluster_ips}])
+        fake_client = FakeClient(
+            [{"name": "Default", "floating_addresses": cluster_ips}]
+        )
         target = TargetCluster(fake_client, network_name="Default")
 
         # Simulate existing unbalanced replications
@@ -407,7 +448,11 @@ class TestTargetClusterDestinationInfo:
         cluster_ips = ["10.120.0.81"]
         repl_api = FakeReplicationAPI(target_relationships)
         cluster_api = FakeClusterAPI("qwho")
-        fake_client = FakeClient([{"name": "Default", "floating_addresses": cluster_ips}], repl_api, cluster_api)
+        fake_client = FakeClient(
+            [{"name": "Default", "floating_addresses": cluster_ips}],
+            repl_api,
+            cluster_api,
+        )
 
         target = TargetCluster(fake_client, network_name="Default")
         dst_info = target.get_destination_info()
@@ -425,7 +470,11 @@ class TestTargetClusterDestinationInfo:
         cluster_ips = ["10.120.0.81"]
         repl_api = FakeReplicationAPI([])
         cluster_api = FakeClusterAPI("empty-cluster")
-        fake_client = FakeClient([{"name": "Default", "floating_addresses": cluster_ips}], repl_api, cluster_api)
+        fake_client = FakeClient(
+            [{"name": "Default", "floating_addresses": cluster_ips}],
+            repl_api,
+            cluster_api,
+        )
 
         target = TargetCluster(fake_client, network_name="Default")
         dst_info = target.get_destination_info()

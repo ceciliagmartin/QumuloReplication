@@ -416,7 +416,8 @@ class TestUnifiedClusterDisplay:
         # Verify source-specific output
         assert "Source Cluster Summary:" in captured.out
         assert "source-cluster" in captured.out
-        assert "Target Cluster" in captured.out  # Shows target when source
+        assert "remote_cluster" in captured.out  # Column header
+        assert "dest-cluster" in captured.out  # Target cluster name in data
         assert "ESTABLISHED" in captured.out
         assert "REPLICATING" in captured.out
 
@@ -447,7 +448,8 @@ class TestUnifiedClusterDisplay:
         # Verify destination-specific output
         assert "Destination Cluster Summary:" in captured.out
         assert "dest-cluster" in captured.out
-        assert "Source Cluster" in captured.out  # Shows source when destination
+        assert "remote_cluster" in captured.out  # Column header
+        assert "source-cluster" in captured.out  # Source cluster name in data
         assert "ESTABLISHED" in captured.out
 
     def test_display_cluster_summary_state_counts(self, capsys):

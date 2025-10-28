@@ -30,6 +30,7 @@ class FakeFileSystemAPI:
             directories: List of directory paths to simulate
         """
         self.directories = directories
+        self.set_file_attr_calls = []  # Track set_file_attr calls
 
     def tree_walk_preorder(self, path: str, max_depth: int = 1) -> List[Dict[str, str]]:
         """Simulate tree walk - returns base dir first, then subdirs"""
@@ -43,6 +44,11 @@ class FakeFileSystemAPI:
                 results.append({"path": dir_path, "type": "FS_FILE_TYPE_DIRECTORY"})
 
         return results
+
+    def set_file_attr(self, path: str, mode: str = None, **kwargs):
+        """Track set_file_attr calls for testing"""
+        self.set_file_attr_calls.append({"path": path, "mode": mode})
+        return {"path": path, "mode": mode}
 
 
 class FakeReplicationAPI:
@@ -99,11 +105,13 @@ class FakeNetworkAPI:
 
     def list_network_status_v2(self) -> List[Dict[str, Any]]:
         """Return fake network status matching real API structure"""
-        return [{
-            "node_id": 1,
-            "node_name": "fake-node-1",
-            "network_statuses": self.networks
-        }]
+        return [
+            {
+                "node_id": 1,
+                "node_name": "fake-node-1",
+                "network_statuses": self.networks,
+            }
+        ]
 
 
 class FakeRestClient:
@@ -119,10 +127,9 @@ class FakeRestClient:
         self.fs = fs_api
         self.replication = repl_api
         self.cluster = cluster_api or FakeClusterAPI()
-        self.network = network_api or FakeNetworkAPI([{
-            "name": "Default",
-            "floating_addresses": ["10.1.1.20", "10.1.1.21"]
-        }])
+        self.network = network_api or FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20", "10.1.1.21"]}]
+        )
 
 
 class FakeClient:
@@ -144,13 +151,17 @@ class TestDstPathNotProvided:
         directories = ["/data/project1", "/data/project2"]
         fs_api = FakeFileSystemAPI(directories)
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
         # Create managers
         rm = ReplicationManager(fake_client)
-        target_cluster = TargetCluster(fake_client, user_provided_ips=["10.1.1.20"], network_name="Default")
+        target_cluster = TargetCluster(
+            fake_client, user_provided_ips=["10.1.1.20"], network_name="Default"
+        )
 
         # Execute with dst_path=None
         rm.create_replications(basepath="/data", dst=target_cluster, dst_path=None)
@@ -172,13 +183,17 @@ class TestDstPathNotProvided:
         directories = ["/data/project1"]
         fs_api = FakeFileSystemAPI(directories)
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
         # Create managers
         rm = ReplicationManager(fake_client)
-        target_cluster = TargetCluster(fake_client, user_provided_ips=["10.1.1.20"], network_name="Default")
+        target_cluster = TargetCluster(
+            fake_client, user_provided_ips=["10.1.1.20"], network_name="Default"
+        )
 
         # Execute with dst_path=""
         rm.create_replications(basepath="/data", dst=target_cluster, dst_path="")
@@ -203,13 +218,17 @@ class TestDstPathSlash:
         directories = ["/data/project1", "/data/project2"]
         fs_api = FakeFileSystemAPI(directories)
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
         # Create managers
         rm = ReplicationManager(fake_client)
-        target_cluster = TargetCluster(fake_client, user_provided_ips=["10.1.1.20"], network_name="Default")
+        target_cluster = TargetCluster(
+            fake_client, user_provided_ips=["10.1.1.20"], network_name="Default"
+        )
 
         # Execute with dst_path="/"
         rm.create_replications(basepath="/data", dst=target_cluster, dst_path="/")
@@ -240,13 +259,17 @@ class TestDstPathCustomPath:
         directories = ["/data/project1", "/data/project2"]
         fs_api = FakeFileSystemAPI(directories)
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
         # Create managers
         rm = ReplicationManager(fake_client)
-        target_cluster = TargetCluster(fake_client, user_provided_ips=["10.1.1.20"], network_name="Default")
+        target_cluster = TargetCluster(
+            fake_client, user_provided_ips=["10.1.1.20"], network_name="Default"
+        )
 
         # Execute with dst_path="/backup"
         rm.create_replications(basepath="/data", dst=target_cluster, dst_path="/backup")
@@ -268,13 +291,17 @@ class TestDstPathCustomPath:
         directories = ["/data/project1"]
         fs_api = FakeFileSystemAPI(directories)
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
         # Create managers
         rm = ReplicationManager(fake_client)
-        target_cluster = TargetCluster(fake_client, user_provided_ips=["10.1.1.20"], network_name="Default")
+        target_cluster = TargetCluster(
+            fake_client, user_provided_ips=["10.1.1.20"], network_name="Default"
+        )
 
         # Execute with dst_path="backup"
         rm.create_replications(basepath="/data", dst=target_cluster, dst_path="backup")
@@ -295,13 +322,17 @@ class TestDstPathCustomPath:
         directories = ["/prod/db1", "/prod/db2"]
         fs_api = FakeFileSystemAPI(directories)
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
         # Create managers
         rm = ReplicationManager(fake_client)
-        target_cluster = TargetCluster(fake_client, user_provided_ips=["10.1.1.20"], network_name="Default")
+        target_cluster = TargetCluster(
+            fake_client, user_provided_ips=["10.1.1.20"], network_name="Default"
+        )
 
         # Execute with dst_path="/dr/backups"
         rm.create_replications(
@@ -342,13 +373,17 @@ class TestDstPathWithExistingReplications:
             }
         ]
 
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
         # Create managers
         rm = ReplicationManager(fake_client)
-        target_cluster = TargetCluster(fake_client, user_provided_ips=["10.1.1.20"], network_name="Default")
+        target_cluster = TargetCluster(
+            fake_client, user_provided_ips=["10.1.1.20"], network_name="Default"
+        )
 
         # Populate cache to load existing replications
         rm.populate_replication_cache()
@@ -381,13 +416,17 @@ class TestFilterInclude:
         ]
         fs_api = FakeFileSystemAPI(directories)
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
         # Create managers
         rm = ReplicationManager(fake_client)
-        target_cluster = TargetCluster(fake_client, user_provided_ips=["10.1.1.20"], network_name="Default")
+        target_cluster = TargetCluster(
+            fake_client, user_provided_ips=["10.1.1.20"], network_name="Default"
+        )
 
         # Execute with filteri="prod" (substring match)
         rm.create_replications(
@@ -415,13 +454,17 @@ class TestFilterInclude:
         ]
         fs_api = FakeFileSystemAPI(directories)
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
         # Create managers
         rm = ReplicationManager(fake_client)
-        target_cluster = TargetCluster(fake_client, user_provided_ips=["10.1.1.20"], network_name="Default")
+        target_cluster = TargetCluster(
+            fake_client, user_provided_ips=["10.1.1.20"], network_name="Default"
+        )
 
         # Execute with multiple patterns (substring matching)
         rm.create_replications(
@@ -446,13 +489,17 @@ class TestFilterInclude:
         directories = ["/data/test-db1", "/data/test-db2"]
         fs_api = FakeFileSystemAPI(directories)
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
         # Create managers
         rm = ReplicationManager(fake_client)
-        target_cluster = TargetCluster(fake_client, user_provided_ips=["10.1.1.20"], network_name="Default")
+        target_cluster = TargetCluster(
+            fake_client, user_provided_ips=["10.1.1.20"], network_name="Default"
+        )
 
         # Execute with filteri that doesn't match
         rm.create_replications(
@@ -473,13 +520,17 @@ class TestFilterInclude:
         directories = ["/snapz/tessdasd/", "/snapz/other/"]
         fs_api = FakeFileSystemAPI(directories)
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
         # Create managers
         rm = ReplicationManager(fake_client)
-        target_cluster = TargetCluster(fake_client, user_provided_ips=["10.1.1.20"], network_name="Default")
+        target_cluster = TargetCluster(
+            fake_client, user_provided_ips=["10.1.1.20"], network_name="Default"
+        )
 
         # Execute with filteri pattern 'tess' (substring match)
         rm.create_replications(
@@ -510,13 +561,17 @@ class TestFilterExclude:
         ]
         fs_api = FakeFileSystemAPI(directories)
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
         # Create managers
         rm = ReplicationManager(fake_client)
-        target_cluster = TargetCluster(fake_client, user_provided_ips=["10.1.1.20"], network_name="Default")
+        target_cluster = TargetCluster(
+            fake_client, user_provided_ips=["10.1.1.20"], network_name="Default"
+        )
 
         # Execute with filtere="test" (substring match)
         rm.create_replications(
@@ -544,13 +599,17 @@ class TestFilterExclude:
         ]
         fs_api = FakeFileSystemAPI(directories)
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
         # Create managers
         rm = ReplicationManager(fake_client)
-        target_cluster = TargetCluster(fake_client, user_provided_ips=["10.1.1.20"], network_name="Default")
+        target_cluster = TargetCluster(
+            fake_client, user_provided_ips=["10.1.1.20"], network_name="Default"
+        )
 
         # Execute with multiple exclude patterns (substring matching)
         rm.create_replications(
@@ -572,13 +631,17 @@ class TestFilterExclude:
         directories = ["/data/test-db1", "/data/test-db2"]
         fs_api = FakeFileSystemAPI(directories)
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
         # Create managers
         rm = ReplicationManager(fake_client)
-        target_cluster = TargetCluster(fake_client, user_provided_ips=["10.1.1.20"], network_name="Default")
+        target_cluster = TargetCluster(
+            fake_client, user_provided_ips=["10.1.1.20"], network_name="Default"
+        )
 
         # Execute with filtere that matches everything (substring match)
         rm.create_replications(
@@ -603,13 +666,17 @@ class TestFilterCombinations:
         directories = ["/data/prod-db1", "/data/test-db1"]
         fs_api = FakeFileSystemAPI(directories)
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
         # Create managers
         rm = ReplicationManager(fake_client)
-        target_cluster = TargetCluster(fake_client, user_provided_ips=["10.1.1.20"], network_name="Default")
+        target_cluster = TargetCluster(
+            fake_client, user_provided_ips=["10.1.1.20"], network_name="Default"
+        )
 
         # Execute with both filteri and dst_path (substring matching)
         rm.create_replications(
@@ -631,13 +698,17 @@ class TestFilterCombinations:
         directories = ["/data/prod-db1", "/data/test-db1"]
         fs_api = FakeFileSystemAPI(directories)
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
         # Create managers
         rm = ReplicationManager(fake_client)
-        target_cluster = TargetCluster(fake_client, user_provided_ips=["10.1.1.20"], network_name="Default")
+        target_cluster = TargetCluster(
+            fake_client, user_provided_ips=["10.1.1.20"], network_name="Default"
+        )
 
         # Execute with both filtere and dst_path (substring matching)
         rm.create_replications(
@@ -659,13 +730,17 @@ class TestFilterCombinations:
         directories = ["/data/prod-db", "/data/test-db", "/data/staging-db"]
         fs_api = FakeFileSystemAPI(directories)
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
         # Create managers
         rm = ReplicationManager(fake_client)
-        target_cluster = TargetCluster(fake_client, user_provided_ips=["10.1.1.20"], network_name="Default")
+        target_cluster = TargetCluster(
+            fake_client, user_provided_ips=["10.1.1.20"], network_name="Default"
+        )
 
         # Execute without any filters
         rm.create_replications(
@@ -717,7 +792,9 @@ class TestCleanWithFilters:
             },
         ]
 
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
@@ -764,7 +841,9 @@ class TestCleanWithFilters:
             },
         ]
 
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
@@ -810,7 +889,9 @@ class TestCleanWithFilters:
             },
         ]
 
-        network_api = FakeNetworkAPI([{"name": "Default", "floating_addresses": ["10.1.1.20"]}])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
@@ -823,6 +904,102 @@ class TestCleanWithFilters:
 
         # Verify - should delete all 3
         assert deleted_count == 3
+
+    def test_clean_with_set_readonly_flag_sets_permissions(self):
+        """
+        Test: clean with set_readonly=True sets paths to read-only before deletion
+        AC: set_file_attr should be called with mode="0555" for each path
+        AC: set_file_attr should be called BEFORE delete_source_relationship
+        """
+        # Setup
+        directories = ["/data/prod-db", "/data/test-db"]
+        fs_api = FakeFileSystemAPI(directories)
+        repl_api = FakeReplicationAPI()
+
+        # Add existing replications
+        repl_api.source_relationship_statuses = [
+            {
+                "id": "repl-001",
+                "source_root_path": "/data/prod-db",
+                "source_root_id": "1",
+                "target_address": "10.1.1.20",
+            },
+            {
+                "id": "repl-002",
+                "source_root_path": "/data/test-db",
+                "source_root_id": "2",
+                "target_address": "10.1.1.20",
+            },
+        ]
+
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
+        rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
+        fake_client = FakeClient(rest_client)
+
+        # Create manager and populate cache
+        rm = ReplicationManager(fake_client)
+        rm.populate_replication_cache()
+
+        # Execute clean with set_readonly=True
+        deleted_count = rm.clean_replications(basepath="/data", set_readonly=True)
+
+        # Verify deletions happened
+        assert deleted_count == 2
+
+        # Verify set_file_attr was called with correct mode
+        assert len(fs_api.set_file_attr_calls) == 2
+        assert fs_api.set_file_attr_calls[0]["path"] == "/data/prod-db"
+        assert fs_api.set_file_attr_calls[0]["mode"] == "0555"
+        assert fs_api.set_file_attr_calls[1]["path"] == "/data/test-db"
+        assert fs_api.set_file_attr_calls[1]["mode"] == "0555"
+
+        # Verify replications were deleted
+        assert len(repl_api.deleted_replications) == 2
+
+    def test_clean_without_set_readonly_flag_skips_permissions(self):
+        """
+        Test: clean with set_readonly=False (default) does NOT set permissions
+        AC: set_file_attr should NOT be called
+        AC: Only delete_source_relationship should be called
+        """
+        # Setup
+        directories = ["/data/prod-db"]
+        fs_api = FakeFileSystemAPI(directories)
+        repl_api = FakeReplicationAPI()
+
+        # Add existing replication
+        repl_api.source_relationship_statuses = [
+            {
+                "id": "repl-001",
+                "source_root_path": "/data/prod-db",
+                "source_root_id": "1",
+                "target_address": "10.1.1.20",
+            },
+        ]
+
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
+        rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
+        fake_client = FakeClient(rest_client)
+
+        # Create manager and populate cache
+        rm = ReplicationManager(fake_client)
+        rm.populate_replication_cache()
+
+        # Execute clean without set_readonly (default False)
+        deleted_count = rm.clean_replications(basepath="/data")
+
+        # Verify deletion happened
+        assert deleted_count == 1
+
+        # Verify set_file_attr was NOT called
+        assert len(fs_api.set_file_attr_calls) == 0
+
+        # Verify replication was deleted
+        assert len(repl_api.deleted_replications) == 1
 
 
 class TestNetworkNameSingleNetwork:
@@ -837,10 +1014,9 @@ class TestNetworkNameSingleNetwork:
         # Setup with single "Default" network
         fs_api = FakeFileSystemAPI([])
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{
-            "name": "Default",
-            "floating_addresses": ["10.1.1.20", "10.1.1.21"]
-        }])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20", "10.1.1.21"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
@@ -858,10 +1034,9 @@ class TestNetworkNameSingleNetwork:
         # Setup with custom network name
         fs_api = FakeFileSystemAPI([])
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{
-            "name": "production",
-            "floating_addresses": ["10.2.2.30", "10.2.2.31"]
-        }])
+        network_api = FakeNetworkAPI(
+            [{"name": "production", "floating_addresses": ["10.2.2.30", "10.2.2.31"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
@@ -879,10 +1054,9 @@ class TestNetworkNameSingleNetwork:
         # Setup with only Default network
         fs_api = FakeFileSystemAPI([])
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{
-            "name": "Default",
-            "floating_addresses": ["10.1.1.20"]
-        }])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
@@ -901,10 +1075,9 @@ class TestNetworkNameSingleNetwork:
         # Setup with Default network
         fs_api = FakeFileSystemAPI([])
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{
-            "name": "Default",
-            "floating_addresses": ["10.1.1.20"]
-        }])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
@@ -930,16 +1103,12 @@ class TestNetworkNameMultipleNetworks:
         # Setup with two networks
         fs_api = FakeFileSystemAPI([])
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([
-            {
-                "name": "Default",
-                "floating_addresses": ["10.120.3.54"]
-            },
-            {
-                "name": "test",
-                "floating_addresses": ["10.120.3.55"]
-            }
-        ])
+        network_api = FakeNetworkAPI(
+            [
+                {"name": "Default", "floating_addresses": ["10.120.3.54"]},
+                {"name": "test", "floating_addresses": ["10.120.3.55"]},
+            ]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
@@ -958,16 +1127,12 @@ class TestNetworkNameMultipleNetworks:
         # Setup with two networks
         fs_api = FakeFileSystemAPI([])
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([
-            {
-                "name": "Default",
-                "floating_addresses": ["10.120.3.54"]
-            },
-            {
-                "name": "test",
-                "floating_addresses": ["10.120.3.55", "10.120.3.56"]
-            }
-        ])
+        network_api = FakeNetworkAPI(
+            [
+                {"name": "Default", "floating_addresses": ["10.120.3.54"]},
+                {"name": "test", "floating_addresses": ["10.120.3.55", "10.120.3.56"]},
+            ]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
@@ -984,6 +1149,7 @@ class TestNetworkNameMultipleNetworks:
         AC: With 3 nodes (each with 1 FIP), collects all 3 FIPs
         Real use case: 4-node cluster with floating IPs distributed across nodes
         """
+
         # Setup custom network API that returns multiple nodes
         class MultiNodeNetworkAPI:
             def __init__(self):
@@ -994,32 +1160,31 @@ class TestNetworkNameMultipleNetworks:
                     {
                         "node_id": 1,
                         "node_name": "node-1",
-                        "network_statuses": [{
-                            "name": "Default",
-                            "floating_addresses": ["10.1.1.20"]
-                        }]
+                        "network_statuses": [
+                            {"name": "Default", "floating_addresses": ["10.1.1.20"]}
+                        ],
                     },
                     {
                         "node_id": 2,
                         "node_name": "node-2",
-                        "network_statuses": [{
-                            "name": "Default",
-                            "floating_addresses": ["10.1.1.21"]
-                        }]
+                        "network_statuses": [
+                            {"name": "Default", "floating_addresses": ["10.1.1.21"]}
+                        ],
                     },
                     {
                         "node_id": 3,
                         "node_name": "node-3",
-                        "network_statuses": [{
-                            "name": "Default",
-                            "floating_addresses": ["10.1.1.22"]
-                        }]
-                    }
+                        "network_statuses": [
+                            {"name": "Default", "floating_addresses": ["10.1.1.22"]}
+                        ],
+                    },
                 ]
 
         fs_api = FakeFileSystemAPI([])
         repl_api = FakeReplicationAPI()
-        rest_client = FakeRestClient(fs_api, repl_api, network_api=MultiNodeNetworkAPI())
+        rest_client = FakeRestClient(
+            fs_api, repl_api, network_api=MultiNodeNetworkAPI()
+        )
         fake_client = FakeClient(rest_client)
 
         # Create target cluster
@@ -1037,6 +1202,7 @@ class TestNetworkNameMultipleNetworks:
         AC: Node with no FIPs doesn't add to available_ips list
         Real use case: Network configured but FIPs not yet assigned
         """
+
         # Setup with one node having FIPs, one without
         class MixedFIPNetworkAPI:
             def list_network_status_v2(self):
@@ -1044,19 +1210,20 @@ class TestNetworkNameMultipleNetworks:
                     {
                         "node_id": 1,
                         "node_name": "node-1",
-                        "network_statuses": [{
-                            "name": "Default",
-                            "floating_addresses": ["10.1.1.20"]
-                        }]
+                        "network_statuses": [
+                            {"name": "Default", "floating_addresses": ["10.1.1.20"]}
+                        ],
                     },
                     {
                         "node_id": 2,
                         "node_name": "node-2",
-                        "network_statuses": [{
-                            "name": "Default",
-                            "floating_addresses": []  # Empty!
-                        }]
-                    }
+                        "network_statuses": [
+                            {
+                                "name": "Default",
+                                "floating_addresses": [],  # Empty!
+                            }
+                        ],
+                    },
                 ]
 
         fs_api = FakeFileSystemAPI([])
@@ -1076,6 +1243,7 @@ class TestNetworkNameMultipleNetworks:
         AC: Node1 has 3 FIPs + Node2 has 2 FIPs → returns all 5 FIPs
         Real use case: Large cluster with many FIPs distributed across nodes
         """
+
         # Setup multiple nodes, each with multiple FIPs
         class MultiNodeMultiFIPNetworkAPI:
             def list_network_status_v2(self):
@@ -1083,32 +1251,41 @@ class TestNetworkNameMultipleNetworks:
                     {
                         "node_id": 1,
                         "node_name": "node-1",
-                        "network_statuses": [{
-                            "name": "Default",
-                            "floating_addresses": ["10.1.1.20", "10.1.1.21", "10.1.1.22"]
-                        }]
+                        "network_statuses": [
+                            {
+                                "name": "Default",
+                                "floating_addresses": [
+                                    "10.1.1.20",
+                                    "10.1.1.21",
+                                    "10.1.1.22",
+                                ],
+                            }
+                        ],
                     },
                     {
                         "node_id": 2,
                         "node_name": "node-2",
-                        "network_statuses": [{
-                            "name": "Default",
-                            "floating_addresses": ["10.1.1.23", "10.1.1.24"]
-                        }]
+                        "network_statuses": [
+                            {
+                                "name": "Default",
+                                "floating_addresses": ["10.1.1.23", "10.1.1.24"],
+                            }
+                        ],
                     },
                     {
                         "node_id": 3,
                         "node_name": "node-3",
-                        "network_statuses": [{
-                            "name": "Default",
-                            "floating_addresses": ["10.1.1.25"]
-                        }]
-                    }
+                        "network_statuses": [
+                            {"name": "Default", "floating_addresses": ["10.1.1.25"]}
+                        ],
+                    },
                 ]
 
         fs_api = FakeFileSystemAPI([])
         repl_api = FakeReplicationAPI()
-        rest_client = FakeRestClient(fs_api, repl_api, network_api=MultiNodeMultiFIPNetworkAPI())
+        rest_client = FakeRestClient(
+            fs_api, repl_api, network_api=MultiNodeMultiFIPNetworkAPI()
+        )
         fake_client = FakeClient(rest_client)
 
         # Create target cluster
@@ -1116,7 +1293,14 @@ class TestNetworkNameMultipleNetworks:
 
         # Verify collects ALL FIPs from all nodes (3 + 2 + 1 = 6 total)
         assert len(target_cluster.available_ips) == 6
-        expected_ips = ["10.1.1.20", "10.1.1.21", "10.1.1.22", "10.1.1.23", "10.1.1.24", "10.1.1.25"]
+        expected_ips = [
+            "10.1.1.20",
+            "10.1.1.21",
+            "10.1.1.22",
+            "10.1.1.23",
+            "10.1.1.24",
+            "10.1.1.25",
+        ]
         assert set(target_cluster.available_ips) == set(expected_ips)
 
 
@@ -1132,10 +1316,9 @@ class TestNetworkNameValidation:
         # Setup with Default network
         fs_api = FakeFileSystemAPI([])
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{
-            "name": "Default",
-            "floating_addresses": ["10.1.1.20", "10.1.1.21"]
-        }])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20", "10.1.1.21"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
@@ -1143,7 +1326,7 @@ class TestNetworkNameValidation:
         target_cluster = TargetCluster(
             fake_client,
             user_provided_ips=["10.1.1.20"],  # Only one of the available IPs
-            network_name="Default"
+            network_name="Default",
         )
 
         # Verify uses user-provided IP, not all from network
@@ -1157,10 +1340,9 @@ class TestNetworkNameValidation:
         # Setup with Default network
         fs_api = FakeFileSystemAPI([])
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{
-            "name": "Default",
-            "floating_addresses": ["10.1.1.20", "10.1.1.21"]
-        }])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20", "10.1.1.21"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 
@@ -1169,7 +1351,7 @@ class TestNetworkNameValidation:
             TargetCluster(
                 fake_client,
                 user_provided_ips=["192.168.1.99"],  # Not in cluster
-                network_name="Default"
+                network_name="Default",
             )
 
         # Verify error mentions invalid IP
@@ -1183,10 +1365,9 @@ class TestNetworkNameValidation:
         # Setup with "Default" network (capital D)
         fs_api = FakeFileSystemAPI([])
         repl_api = FakeReplicationAPI()
-        network_api = FakeNetworkAPI([{
-            "name": "Default",
-            "floating_addresses": ["10.1.1.20"]
-        }])
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
         rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
         fake_client = FakeClient(rest_client)
 

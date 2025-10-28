@@ -26,16 +26,42 @@ Discover subfolders with max-depth1 and generate replication relationships
 """
 
 import argparse
-import csv
 import logging
 import sys
+from datetime import datetime
 from typing import List, Dict, Optional, Any, Tuple
 from qqbase import Client, RestClient, create_credentials
+from qqutils import display_table, export_csv
 
+# Generate timestamped log filename in current directory
+log_filename = f"replication_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
+# Configure logging to both console and file
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+
+# Create formatter
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
+# Console handler
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(formatter)
+
+# File handler (always created in current directory)
+file_handler = logging.FileHandler(log_filename, mode="a")
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(formatter)
+
+# Configure root logger with both handlers
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+# Clear any existing handlers to prevent duplicates
+root_logger.handlers.clear()
+root_logger.addHandler(console_handler)
+root_logger.addHandler(file_handler)
+
+# Log startup message with file location
+logger.info(f"Logging to file: {log_filename}")
 
 
 class TargetCluster:
@@ -68,27 +94,29 @@ class TargetCluster:
         fip_data = []
 
         for node_status in self.client.network.list_network_status_v2():
-            network_list = node_status['network_statuses']
+            network_list = node_status["network_statuses"]
 
             # Find network by name
             matching_network = None
             for network in network_list:
-                if network.get('name') == self.network_name:
+                if network.get("name") == self.network_name:
                     matching_network = network
                     break
 
             if not matching_network:
-                available = [n.get('name') for n in network_list]
+                available = [n.get("name") for n in network_list]
                 raise ValueError(
                     f"Network '{self.network_name}' not found on node {node_status.get('node_name', 'unknown')}. "
                     f"Available networks: {', '.join(available)}"
                 )
 
-            floating_addresses = matching_network.get('floating_addresses', [])
+            floating_addresses = matching_network.get("floating_addresses", [])
             # Extend fip_data with all FIPs from this node's network
             fip_data.extend(floating_addresses)
 
-        logger.info(f'Using network "{self.network_name}" - Dst cluster FIPs: {fip_data}')
+        logger.info(
+            f'Using network "{self.network_name}" - Dst cluster FIPs: {fip_data}'
+        )
 
         if not fip_data:
             raise ValueError(
@@ -369,21 +397,54 @@ class ReplicationManager:
                 "dst": dst_ip,
             }
 
-    @staticmethod
-    def _truncate_string(s: str, max_len: int) -> str:
+    def _transform_relationships_to_table_data(
+        self,
+        cluster_info: Dict[str, Any],
+        cluster_type: str = "Source",
+    ) -> List[Dict[str, Any]]:
         """
-        Truncate string to max length with '...' suffix if needed.
+        Transform relationship data to flat list of dicts for display/export.
 
         Args:
-            s: String to truncate
-            max_len: Maximum length including '...'
+            cluster_info: Dict with cluster_name, relationships
+            cluster_type: Either "Source" or "Destination"
 
         Returns:
-            Truncated string
+            List of flattened relationship dicts ready for display/CSV
         """
-        if len(s) <= max_len:
-            return s
-        return s[: max_len - 3] + "..."
+        cluster_name = cluster_info.get("cluster_name", "Unknown")
+        cluster_id = cluster_info.get("cluster_id", "")
+        relationships = cluster_info.get("relationships", [])
+
+        # Determine field names based on cluster type
+        if cluster_type == "Source":
+            remote_cluster_field = "target_cluster_name"
+        else:  # Destination
+            remote_cluster_field = "source_cluster_name"
+
+        table_data = []
+        for rel in sorted(relationships, key=lambda x: x.get("source_root_path", "")):
+            row = {
+                "cluster_type": cluster_type,
+                "cluster_name": cluster_name,
+                "cluster_id": cluster_id,
+                "source_path": rel.get("source_root_path", ""),
+                "target_path": rel.get("target_root_path", ""),
+                "remote_cluster": rel.get(remote_cluster_field, ""),
+                "state": rel.get("state", ""),
+                "replication_id": rel.get("id", ""),
+                "error": rel.get("error_from_last_job", ""),
+                "recovery_point": rel.get("recovery_point", ""),
+                "queued_snapshots": rel.get("queued_snapshot_count", "")
+                if cluster_type == "Source"
+                else "",
+                "replication_mode": rel.get("replication_mode", "")
+                if cluster_type == "Source"
+                else "",
+            }
+            table_data.append(row)
+
+        return table_data
 
     def _display_cluster_summary_card(
         self, cluster_info: Dict[str, Any], cluster_type: str = "Source"
@@ -491,35 +552,14 @@ class ReplicationManager:
         self, cluster_info: Dict[str, Any], cluster_type: str = "Source"
     ) -> None:
         """
-        Unified display for both source and destination cluster information (fixed-width table).
+        Display cluster replication relationships as table (uses qqutils).
 
         Args:
             cluster_info: Dict with cluster_name, cluster_id, relationships
             cluster_type: Either "Source" or "Destination"
         """
-        # Fixed column widths for predictable table size (~130 chars total)
-        SOURCE_PATH_WIDTH = 35
-        TARGET_PATH_WIDTH = 35
-        STATE_WIDTH = 15
-        CLUSTER_WIDTH = 20
-        ID_WIDTH = 16  # Truncated UUID
-
         cluster_name = cluster_info.get("cluster_name", "Unknown")
         relationships = cluster_info.get("relationships", [])
-
-        # Determine field names based on cluster type
-        if cluster_type == "Source":
-            local_path_field = "source_root_path"
-            local_label = "Source"
-            remote_cluster_field = "target_cluster_name"
-            remote_path_field = "target_root_path"
-            remote_label = "Target"
-        else:  # Destination
-            local_path_field = "target_root_path"
-            local_label = "Target"
-            remote_cluster_field = "source_cluster_name"
-            remote_path_field = "source_root_path"
-            remote_label = "Source"
 
         print("\n")
         print("=" * 130)
@@ -532,29 +572,22 @@ class ReplicationManager:
             print(f"\nNo {cluster_type.lower()} replication relationships found.")
             return
 
-        # Header
+        # Transform data and display using qqutils
+        table_data = self._transform_relationships_to_table_data(
+            cluster_info, cluster_type
+        )
+
+        # Select columns for display (compact view)
+        display_columns = [
+            "source_path",
+            "target_path",
+            "state",
+            "remote_cluster",
+            "replication_id",
+        ]
+
         print("\n")
-        header = f"{f'{local_label} Path':<{SOURCE_PATH_WIDTH}} | {f'{remote_label} Path':<{TARGET_PATH_WIDTH}} | {'State':<{STATE_WIDTH}} | {f'{remote_label} Cluster':<{CLUSTER_WIDTH}} | {'ID (truncated)':<{ID_WIDTH}}"
-        print(header)
-        print("-" * len(header))
-
-        # Rows with truncation
-        for rel in sorted(relationships, key=lambda x: x.get("source_root_path", "")):
-            local_path = self._truncate_string(
-                rel.get(local_path_field, "N/A"), SOURCE_PATH_WIDTH
-            )
-            remote_path = self._truncate_string(
-                rel.get(remote_path_field, "N/A"), TARGET_PATH_WIDTH
-            )
-            state = self._truncate_string(rel.get("state", "N/A"), STATE_WIDTH)
-            remote_cluster = self._truncate_string(
-                rel.get(remote_cluster_field, "N/A"), CLUSTER_WIDTH
-            )
-            rel_id = rel.get("id", "N/A")[:ID_WIDTH]  # Truncate UUID
-
-            print(
-                f"{local_path:<{SOURCE_PATH_WIDTH}} | {remote_path:<{TARGET_PATH_WIDTH}} | {state:<{STATE_WIDTH}} | {remote_cluster:<{CLUSTER_WIDTH}} | {rel_id:<{ID_WIDTH}}"
-            )
+        display_table(table_data, columns=display_columns)
 
         # State summary
         state_counts = {}
@@ -597,7 +630,7 @@ class ReplicationManager:
         dst_info: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
-        Save replication relationship data to CSV file.
+        Save replication relationship data to CSV file (uses qqutils).
 
         Args:
             filepath: Path to CSV file to create
@@ -606,63 +639,18 @@ class ReplicationManager:
 
         The CSV includes all relationship details without truncation.
         """
-        fieldnames = [
-            "cluster_type",
-            "cluster_name",
-            "cluster_id",
-            "source_path",
-            "target_path",
-            "remote_cluster",
-            "state",
-            "replication_id",
-            "error",
-            "recovery_point",
-            "queued_snapshots",
-            "replication_mode",
-        ]
+        # Transform source data
+        csv_data = self._transform_relationships_to_table_data(source_info, "Source")
 
-        with open(filepath, "w", newline="") as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
+        # Add destination data if provided
+        if dst_info:
+            csv_data.extend(
+                self._transform_relationships_to_table_data(dst_info, "Destination")
+            )
 
-            # Write source relationships
-            source_relationships = source_info.get("relationships", [])
-            for rel in source_relationships:
-                row = {
-                    "cluster_type": "Source",
-                    "cluster_name": source_info.get("cluster_name", ""),
-                    "cluster_id": source_info.get("cluster_id", ""),
-                    "source_path": rel.get("source_root_path", ""),
-                    "target_path": rel.get("target_root_path", ""),
-                    "remote_cluster": rel.get("target_cluster_name", ""),
-                    "state": rel.get("state", ""),
-                    "replication_id": rel.get("id", ""),
-                    "error": rel.get("error_from_last_job", ""),
-                    "recovery_point": rel.get("recovery_point", ""),
-                    "queued_snapshots": rel.get("queued_snapshot_count", ""),
-                    "replication_mode": rel.get("replication_mode", ""),
-                }
-                writer.writerow(row)
-
-            # Write destination relationships if provided
-            if dst_info:
-                dst_relationships = dst_info.get("relationships", [])
-                for rel in dst_relationships:
-                    row = {
-                        "cluster_type": "Destination",
-                        "cluster_name": dst_info.get("cluster_name", ""),
-                        "cluster_id": dst_info.get("cluster_id", ""),
-                        "source_path": rel.get("source_root_path", ""),
-                        "target_path": rel.get("target_root_path", ""),
-                        "remote_cluster": rel.get("source_cluster_name", ""),
-                        "state": rel.get("state", ""),
-                        "replication_id": rel.get("id", ""),
-                        "error": rel.get("error_from_last_job", ""),
-                        "recovery_point": rel.get("recovery_point", ""),
-                        "queued_snapshots": "",  # Not available on target side
-                        "replication_mode": "",  # Not available on target side
-                    }
-                    writer.writerow(row)
+        # Use qqutils to export
+        with open(filepath, "w") as csvfile:
+            export_csv(csv_data, csvfile)
 
         logger.info(f"Saved replication data to CSV: {filepath}")
 
@@ -742,7 +730,9 @@ class ReplicationManager:
                         f"Replication already existing in folder {path}. Skipping."
                     )
 
-    def clean_replications(self, basepath, filteri=None, filtere=None):
+    def clean_replications(
+        self, basepath, filteri=None, filtere=None, set_readonly=False
+    ):
         """
         Delete source-side replication relationships under basepath
 
@@ -750,6 +740,7 @@ class ReplicationManager:
             basepath: Base path to search for replications to delete
             filteri: Include only directories containing these strings (default: None = all)
             filtere: Exclude directories containing these strings (default: None = none)
+            set_readonly: Set source paths to read-only (mode 0555) before deletion (default: False)
 
         Returns:
             Number of relationships deleted
@@ -777,6 +768,11 @@ class ReplicationManager:
                             f"Skipping {path} - matches exclude filter (patterns: {filtere})"
                         )
                         continue
+
+                # Set path to read-only before deleting replication if requested
+                if set_readonly:
+                    logger.info(f"Setting {path} to read-only (mode 0555)")
+                    self.client.fs.set_file_attr(path=path, mode="0555")
 
                 rid = values.get("replid")
                 logger.info(f"Clearing replication with {rid} covering folder {path}")
@@ -896,9 +892,6 @@ Examples:
     )
     parser.add_argument("--basepath", default="/", help="Directory path to search")
     parser.add_argument(
-        "--action", choices=["create", "clean", "summary", "accept"], default="summary"
-    )
-    parser.add_argument(
         "--format",
         choices=["table", "card"],
         default="table",
@@ -930,7 +923,7 @@ Examples:
         "--dst_network",
         default="Default",
         help="Network name for floating IPs (default: 'Default'). "
-             "View available networks in the Qumulo web UI under Cluster > Network."
+        "View available networks in the Qumulo web UI under Cluster > Network.",
     )
     parser.add_argument(
         "--allow_non_empty_dir",
@@ -958,6 +951,14 @@ Examples:
         "--filtere",
         nargs="+",
         help="Exclude directories containing these strings (e.g., --filtere 'test' 'temp'). Cannot be used with --filteri.",
+    )
+    parser.add_argument(
+        "--set_readonly",
+        action="store_true",
+        help="Set source paths to read-only (mode 0555) before deleting replication relationships (clean action only)",
+    )
+    parser.add_argument(
+        "--action", choices=["create", "clean", "summary", "accept"], default="summary"
     )
 
     args = parser.parse_args()
@@ -1032,7 +1033,10 @@ Examples:
             # Populate repli_paths before cleaning (bug fix)
             rm.populate_replication_cache()
             src_deleted_count = rm.clean_replications(
-                args.basepath, filteri=args.filteri, filtere=args.filtere
+                args.basepath,
+                filteri=args.filteri,
+                filtere=args.filtere,
+                set_readonly=args.set_readonly,
             )
             logger.info(
                 f"Deleted {src_deleted_count} replication relationship(s) on source"
