@@ -30,6 +30,7 @@ class FakeFileSystemAPI:
             directories: List of directory paths to simulate
         """
         self.directories = directories
+        self.set_file_attr_calls = []  # Track set_file_attr calls
 
     def tree_walk_preorder(self, path: str, max_depth: int = 1) -> List[Dict[str, str]]:
         """Simulate tree walk - returns base dir first, then subdirs"""
@@ -43,6 +44,11 @@ class FakeFileSystemAPI:
                 results.append({"path": dir_path, "type": "FS_FILE_TYPE_DIRECTORY"})
 
         return results
+
+    def set_file_attr(self, path: str, mode: str = None, **kwargs):
+        """Track set_file_attr calls for testing"""
+        self.set_file_attr_calls.append({"path": path, "mode": mode})
+        return {"path": path, "mode": mode}
 
 
 class FakeReplicationAPI:
@@ -898,6 +904,102 @@ class TestCleanWithFilters:
 
         # Verify - should delete all 3
         assert deleted_count == 3
+
+    def test_clean_with_set_readonly_flag_sets_permissions(self):
+        """
+        Test: clean with set_readonly=True sets paths to read-only before deletion
+        AC: set_file_attr should be called with mode="0555" for each path
+        AC: set_file_attr should be called BEFORE delete_source_relationship
+        """
+        # Setup
+        directories = ["/data/prod-db", "/data/test-db"]
+        fs_api = FakeFileSystemAPI(directories)
+        repl_api = FakeReplicationAPI()
+
+        # Add existing replications
+        repl_api.source_relationship_statuses = [
+            {
+                "id": "repl-001",
+                "source_root_path": "/data/prod-db",
+                "source_root_id": "1",
+                "target_address": "10.1.1.20",
+            },
+            {
+                "id": "repl-002",
+                "source_root_path": "/data/test-db",
+                "source_root_id": "2",
+                "target_address": "10.1.1.20",
+            },
+        ]
+
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
+        rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
+        fake_client = FakeClient(rest_client)
+
+        # Create manager and populate cache
+        rm = ReplicationManager(fake_client)
+        rm.populate_replication_cache()
+
+        # Execute clean with set_readonly=True
+        deleted_count = rm.clean_replications(basepath="/data", set_readonly=True)
+
+        # Verify deletions happened
+        assert deleted_count == 2
+
+        # Verify set_file_attr was called with correct mode
+        assert len(fs_api.set_file_attr_calls) == 2
+        assert fs_api.set_file_attr_calls[0]["path"] == "/data/prod-db"
+        assert fs_api.set_file_attr_calls[0]["mode"] == "0555"
+        assert fs_api.set_file_attr_calls[1]["path"] == "/data/test-db"
+        assert fs_api.set_file_attr_calls[1]["mode"] == "0555"
+
+        # Verify replications were deleted
+        assert len(repl_api.deleted_replications) == 2
+
+    def test_clean_without_set_readonly_flag_skips_permissions(self):
+        """
+        Test: clean with set_readonly=False (default) does NOT set permissions
+        AC: set_file_attr should NOT be called
+        AC: Only delete_source_relationship should be called
+        """
+        # Setup
+        directories = ["/data/prod-db"]
+        fs_api = FakeFileSystemAPI(directories)
+        repl_api = FakeReplicationAPI()
+
+        # Add existing replication
+        repl_api.source_relationship_statuses = [
+            {
+                "id": "repl-001",
+                "source_root_path": "/data/prod-db",
+                "source_root_id": "1",
+                "target_address": "10.1.1.20",
+            },
+        ]
+
+        network_api = FakeNetworkAPI(
+            [{"name": "Default", "floating_addresses": ["10.1.1.20"]}]
+        )
+        rest_client = FakeRestClient(fs_api, repl_api, network_api=network_api)
+        fake_client = FakeClient(rest_client)
+
+        # Create manager and populate cache
+        rm = ReplicationManager(fake_client)
+        rm.populate_replication_cache()
+
+        # Execute clean without set_readonly (default False)
+        deleted_count = rm.clean_replications(basepath="/data")
+
+        # Verify deletion happened
+        assert deleted_count == 1
+
+        # Verify set_file_attr was NOT called
+        assert len(fs_api.set_file_attr_calls) == 0
+
+        # Verify replication was deleted
+        assert len(repl_api.deleted_replications) == 1
 
 
 class TestNetworkNameSingleNetwork:
