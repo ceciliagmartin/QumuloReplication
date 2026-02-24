@@ -1,0 +1,8 @@
+# Core dependencies
+pandas>=2.0.0
+
+# Testing dependencies
+pytest>=7.0.0
+
+# Qumulo SDK (if not already installed)
+# qumulo-api
